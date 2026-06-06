@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from pydantic import BaseModel, Field
 from database import get_db, get_settings
-from auth import get_current_user, require_role
+from auth import get_current_user, require_role, hash_password
 import models
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -51,6 +52,23 @@ def get_token_usage(db: Session = Depends(get_db), user=Depends(require_role("ad
         "token_budget": budget,
         "tokens_remaining": max(0, budget - total),
     }
+
+class ResetPasswordRequest(BaseModel):
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+@router.post("/users/{user_id}/reset-password")
+def reset_user_password(
+    user_id: str,
+    req: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+    admin=Depends(require_role("admin")),
+):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+    user.hashed_password = hash_password(req.new_password)
+    db.commit()
+    return {"message": f"Password reset for {user.username}"}
 
 @router.get("/sessions")
 def list_all_sessions(db: Session = Depends(get_db), user=Depends(get_current_user)):

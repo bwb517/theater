@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { adminApi, authApi } from '../api/client'
 import { LoadingSpinner } from '../components/LoadingSpinner'
 import { StatusBadge } from '../components/StatusBadge'
-import { Shield, Users, Activity, Database, RefreshCw, AlertCircle } from 'lucide-react'
+import { Shield, Users, Activity, Database, RefreshCw, AlertCircle, KeyRound, Check, X } from 'lucide-react'
 
 function StatCard({ label, value, sub, icon: Icon, color = 'text-theater-accent-light' }) {
   return (
@@ -13,6 +13,63 @@ function StatCard({ label, value, sub, icon: Icon, color = 'text-theater-accent-
       </div>
       <p className={`text-2xl font-bold font-mono ${color}`}>{value ?? '—'}</p>
       {sub && <p className="text-theater-muted text-xs mt-1">{sub}</p>}
+    </div>
+  )
+}
+
+function ResetPasswordCell({ userId }) {
+  const [open, setOpen] = useState(false)
+  const [pw, setPw] = useState('')
+  const [status, setStatus] = useState(null) // null | 'ok' | 'err'
+  const [msg, setMsg] = useState('')
+
+  const submit = async () => {
+    setStatus(null)
+    try {
+      await adminApi.resetPassword(userId, pw)
+      setStatus('ok')
+      setMsg('Password updated')
+      setPw('')
+      setTimeout(() => { setOpen(false); setStatus(null) }, 1500)
+    } catch (e) {
+      setStatus('err')
+      setMsg(e.response?.data?.detail || 'Failed')
+    }
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="flex items-center gap-1 text-theater-muted hover:text-theater-accent-light transition-colors text-xs font-mono"
+        title="Reset password"
+      >
+        <KeyRound className="w-3.5 h-3.5" /> Reset
+      </button>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <input
+        type="password"
+        value={pw}
+        onChange={e => setPw(e.target.value)}
+        placeholder="New password"
+        minLength={8}
+        className="bg-theater-bg border border-theater-border rounded px-2 py-1 text-xs text-theater-text w-32 focus:outline-none focus:border-theater-accent"
+        onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') setOpen(false) }}
+        autoFocus
+      />
+      <button onClick={submit} disabled={pw.length < 8} className="text-theater-green hover:text-green-400 disabled:opacity-30 transition-colors" title="Confirm">
+        <Check className="w-3.5 h-3.5" />
+      </button>
+      <button onClick={() => { setOpen(false); setPw(''); setStatus(null) }} className="text-theater-muted hover:text-theater-red transition-colors" title="Cancel">
+        <X className="w-3.5 h-3.5" />
+      </button>
+      {status && (
+        <span className={`text-xs font-mono ${status === 'ok' ? 'text-theater-green' : 'text-theater-red'}`}>{msg}</span>
+      )}
     </div>
   )
 }
@@ -174,6 +231,7 @@ export default function Admin() {
                 <th className="text-left py-3 px-4 text-theater-muted font-mono">Role</th>
                 <th className="text-left py-3 px-4 text-theater-muted font-mono">Clearance</th>
                 <th className="text-left py-3 px-4 text-theater-muted font-mono">Status</th>
+                <th className="text-left py-3 px-4 text-theater-muted font-mono">Password</th>
               </tr>
             </thead>
             <tbody>
@@ -193,6 +251,7 @@ export default function Admin() {
                       {u.is_active ? 'ACTIVE' : 'INACTIVE'}
                     </span>
                   </td>
+                  <td className="py-3 px-4"><ResetPasswordCell userId={u.id} /></td>
                 </tr>
               ))}
             </tbody>
