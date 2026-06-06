@@ -2,10 +2,11 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../App'
 import { authApi } from '../api/client'
-import { Shield, Lock, User, AlertCircle } from 'lucide-react'
+import { Shield, Lock, User, Mail, AlertCircle } from 'lucide-react'
 
 export default function Login() {
-  const [creds, setCreds] = useState({ username: '', password: '' })
+  const [mode, setMode] = useState('login') // 'login' | 'register'
+  const [creds, setCreds] = useState({ username: '', email: '', password: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const { login } = useAuth()
@@ -16,14 +17,30 @@ export default function Login() {
     setLoading(true)
     setError('')
     try {
-      const res = await authApi.login(creds.username, creds.password)
-      login(res.data.user, res.data.access_token)
-      navigate('/')
+      if (mode === 'login') {
+        const res = await authApi.login(creds.username, creds.password)
+        login(res.data.user, res.data.access_token)
+        navigate('/')
+      } else {
+        const res = await authApi.register({
+          username: creds.username,
+          email: creds.email,
+          password: creds.password,
+        })
+        login(res.data.user, res.data.access_token)
+        navigate('/')
+      }
     } catch (err) {
       setError(err.response?.data?.detail || 'Authentication failed')
     } finally {
       setLoading(false)
     }
+  }
+
+  const switchMode = () => {
+    setMode(m => m === 'login' ? 'register' : 'login')
+    setError('')
+    setCreds({ username: '', email: '', password: '' })
   }
 
   return (
@@ -44,7 +61,9 @@ export default function Login() {
             <p className="text-theater-gray text-sm mt-1">AI Wargaming Platform</p>
             <div className="flex items-center justify-center gap-2 mt-3">
               <div className="h-px w-12 bg-theater-border" />
-              <span className="text-theater-muted text-xs">Secure Access</span>
+              <span className="text-theater-muted text-xs">
+                {mode === 'login' ? 'Secure Access' : 'Create Account'}
+              </span>
               <div className="h-px w-12 bg-theater-border" />
             </div>
           </div>
@@ -67,6 +86,25 @@ export default function Login() {
               </div>
             </div>
 
+            {mode === 'register' && (
+              <div>
+                <label className="block text-xs text-theater-gray font-medium mb-1.5">
+                  Email
+                </label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-theater-muted" />
+                  <input
+                    type="email"
+                    value={creds.email}
+                    onChange={e => setCreds(p => ({ ...p, email: e.target.value }))}
+                    className="w-full bg-theater-bg border border-theater-border rounded px-10 py-2.5 text-theater-text text-sm focus:outline-none focus:border-theater-accent transition-colors"
+                    placeholder="Enter email"
+                    required
+                  />
+                </div>
+              </div>
+            )}
+
             <div>
               <label className="block text-xs text-theater-gray font-medium mb-1.5">
                 Password
@@ -78,7 +116,7 @@ export default function Login() {
                   value={creds.password}
                   onChange={e => setCreds(p => ({ ...p, password: e.target.value }))}
                   className="w-full bg-theater-bg border border-theater-border rounded px-10 py-2.5 text-theater-text text-sm focus:outline-none focus:border-theater-accent transition-colors"
-                  placeholder="Enter password"
+                  placeholder={mode === 'register' ? 'Min 8 characters' : 'Enter password'}
                   required
                 />
               </div>
@@ -94,16 +132,36 @@ export default function Login() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-theater-accent hover:bg-theater-accent-light disabled:opacity-50 text-theater-text font-semibold py-2.5 rounded transition-colors mt-2"
+              className="w-full bg-theater-accent hover:bg-theater-accent-light disabled:opacity-50 text-white font-semibold py-2.5 rounded transition-colors mt-2"
             >
-              {loading ? 'Signing in...' : 'Sign In'}
+              {loading
+                ? (mode === 'login' ? 'Signing in...' : 'Creating account...')
+                : (mode === 'login' ? 'Sign In' : 'Create Account')}
             </button>
           </form>
 
-          <div className="mt-6 pt-4 border-t border-theater-border">
-            <p className="text-center text-theater-muted text-xs">
-              Contact the administrator for access credentials.
-            </p>
+          <div className="mt-6 pt-4 border-t border-theater-border text-center">
+            {mode === 'login' ? (
+              <p className="text-theater-muted text-xs">
+                Don't have an account?{' '}
+                <button
+                  onClick={switchMode}
+                  className="text-theater-accent font-medium hover:underline"
+                >
+                  Sign Up
+                </button>
+              </p>
+            ) : (
+              <p className="text-theater-muted text-xs">
+                Already have an account?{' '}
+                <button
+                  onClick={switchMode}
+                  className="text-theater-accent font-medium hover:underline"
+                >
+                  Sign In
+                </button>
+              </p>
+            )}
           </div>
         </div>
 
