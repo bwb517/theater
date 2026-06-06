@@ -5,7 +5,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from database import engine, settings, get_db
+from database import engine, settings, get_db, _is_sqlite
 from limiter import limiter
 import models
 
@@ -15,17 +15,28 @@ log = logging.getLogger("theater")
 # Create all tables
 models.Base.metadata.create_all(bind=engine)
 
-# Add columns introduced after initial schema (SQLite doesn't support ALTER TABLE in create_all)
+# Add columns introduced after initial schema
 def _run_migrations():
+    _cols = ("ai_personality_overrides", "previous_game_state")
     with engine.connect() as conn:
-        result = conn.execute(text("PRAGMA table_info(game_sessions)"))
-        existing = {row[1] for row in result}
-        if "ai_personality_overrides" not in existing:
-            conn.execute(text("ALTER TABLE game_sessions ADD COLUMN ai_personality_overrides TEXT"))
-            conn.commit()
-        if "previous_game_state" not in existing:
-            conn.execute(text("ALTER TABLE game_sessions ADD COLUMN previous_game_state TEXT"))
-            conn.commit()
+        if _is_sqlite:
+            # SQLite: use PRAGMA to list existing columns
+            result = conn.execute(text("PRAGMA table_info(game_sessions)"))
+            existing = {row[1] for row in result}
+            for col in _cols:
+                if col not in existing:
+                    conn.execute(text(f"ALTER TABLE game_sessions ADD COLUMN {col} TEXT"))
+                    conn.commit()
+        else:
+            # PostgreSQL: use information_schema to check column existence
+            for col in _cols:
+                result = conn.execute(text(
+                    "SELECT 1 FROM information_schema.columns "
+                    "WHERE table_name = 'game_sessions' AND column_name = :col"
+                ), {"col": col})
+                if not result.fetchone():
+                    conn.execute(text(f"ALTER TABLE game_sessions ADD COLUMN {col} TEXT"))
+                    conn.commit()
 
 _run_migrations()
 
