@@ -1,0 +1,2 @@
+# theater
+AI powered wargame
