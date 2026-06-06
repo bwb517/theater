@@ -12,7 +12,7 @@ const navItems = [
   { to: '/scenarios', label: 'Scenario Library', icon: BookOpen, end: true },
   { to: '/scenarios/new', label: 'New Scenario', icon: Plus },
   { to: '/settings', label: 'Settings', icon: SlidersHorizontal },
-  { to: '/admin', label: 'Admin', icon: Shield },
+  { to: '/admin', label: 'Admin', icon: Shield, adminOnly: true },
 ]
 
 function fmt(n) {
@@ -62,7 +62,7 @@ export default function Layout() {
         {/* Nav */}
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
           <p className="text-theater-muted text-xs px-2 py-1 font-medium">Navigation</p>
-          {navItems.map(({ to, label, icon: Icon, end }) => (
+          {navItems.filter(item => !item.adminOnly || user?.role === 'admin').map(({ to, label, icon: Icon, end }) => (
             <NavLink
               key={to}
               to={to}
