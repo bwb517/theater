@@ -3,7 +3,43 @@ import { useNavigate } from 'react-router-dom'
 import { sessionsApi, scenariosApi, adminApi } from '../api/client'
 import { LoadingSpinner } from '../components/LoadingSpinner'
 import { StatusBadge } from '../components/StatusBadge'
-import { Plus, Play, BookOpen, BarChart3, FileText, Activity, Users, Map, Shield, Trash2 } from 'lucide-react'
+import { Plus, BookOpen, FileText, Activity, Users, Shield, Trash2, ChevronUp, Info } from 'lucide-react'
+
+const WELCOME_KEY = 'theater_welcome_dismissed'
+
+function WelcomeBanner() {
+  const [dismissed, setDismissed] = useState(() => !!localStorage.getItem(WELCOME_KEY))
+
+  if (dismissed) return null
+
+  return (
+    <div className="bg-theater-card border border-theater-accent/30 rounded-lg p-5 relative">
+      <div className="flex items-start gap-3">
+        <Info className="w-5 h-5 text-theater-accent-light flex-shrink-0 mt-0.5" />
+        <div className="flex-1 space-y-3">
+          <h2 className="text-theater-text font-semibold font-mono tracking-wider">Welcome to THEATER</h2>
+          <p className="text-theater-gray text-sm leading-relaxed">
+            THEATER is an AI-powered military wargaming platform. Here's how to get started:
+          </p>
+          <ol className="space-y-2 text-sm text-theater-gray list-none">
+            <li className="flex gap-2"><span className="text-theater-accent-light font-mono font-bold">01</span><span><strong className="text-theater-text">Build a Scenario</strong> — click <em>New Scenario</em> or browse the Scenario Library. Use natural language to generate a full scenario with factions, units, and objectives via AI.</span></li>
+            <li className="flex gap-2"><span className="text-theater-accent-light font-mono font-bold">02</span><span><strong className="text-theater-text">Start a Session</strong> — launch a game session from any scenario. Assign factions to players or AI, then begin turn-by-turn play on the Operational Map.</span></li>
+            <li className="flex gap-2"><span className="text-theater-accent-light font-mono font-bold">03</span><span><strong className="text-theater-text">Submit Orders & Adjudicate</strong> — players submit moves across five warfighting functions. The AI Red Team generates adversary COAs and the adjudicator resolves each turn.</span></li>
+            <li className="flex gap-2"><span className="text-theater-accent-light font-mono font-bold">04</span><span><strong className="text-theater-text">Analyze Outcomes</strong> — run Monte Carlo probability analysis, review the After Action Report, or export findings to PDF.</span></li>
+          </ol>
+          <p className="text-theater-muted text-xs font-mono">Demo credentials — admin: <strong>admin / theater123</strong> &nbsp;·&nbsp; player: <strong>player1 / theater123</strong></p>
+        </div>
+        <button
+          onClick={() => { localStorage.setItem(WELCOME_KEY, '1'); setDismissed(true) }}
+          className="text-theater-muted hover:text-theater-text transition-colors flex-shrink-0"
+          title="Dismiss"
+        >
+          <ChevronUp className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  )
+}
 
 function StatCard({ label, value, icon: Icon, color = 'theater-accent-light' }) {
   return (
@@ -19,55 +55,6 @@ function StatCard({ label, value, icon: Icon, color = 'theater-accent-light' }) 
   )
 }
 
-function SessionCard({ session, onClick, onDelete }) {
-  const pct = Math.round((session.current_turn / session.max_turns) * 100)
-  return (
-    <div
-      onClick={onClick}
-      className="bg-theater-card border border-theater-border rounded-lg p-4 hover:border-theater-accent/40 cursor-pointer transition-all hover:shadow-lg hover:shadow-theater-accent/5 group"
-    >
-      <div className="flex items-start justify-between mb-3">
-        <div>
-          <h3 className="text-theater-text font-semibold text-sm group-hover:text-theater-accent-light transition-colors">{session.title}</h3>
-          <p className="text-theater-muted text-xs font-mono mt-0.5">
-            Turn {session.current_turn} of {session.max_turns}
-          </p>
-        </div>
-        <StatusBadge status={session.status} />
-      </div>
-      <div className="space-y-2">
-        <div className="flex justify-between items-center text-xs">
-          <span className="text-theater-muted font-mono">Progress</span>
-          <span className="text-theater-gray font-mono">{pct}%</span>
-        </div>
-        <div className="h-1.5 bg-theater-border rounded-full overflow-hidden">
-          <div
-            className="h-full bg-theater-accent-light rounded-full transition-all"
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-      </div>
-      <div className="mt-3 pt-3 border-t border-theater-border flex gap-2">
-        <button className="flex-1 flex items-center justify-center gap-1.5 text-xs font-mono text-theater-accent-light hover:text-theater-text transition-colors">
-          <Play className="w-3 h-3" /> Play
-        </button>
-        <button className="flex-1 flex items-center justify-center gap-1.5 text-xs font-mono text-theater-gray hover:text-theater-text transition-colors">
-          <FileText className="w-3 h-3" /> AAR
-        </button>
-        <button className="flex-1 flex items-center justify-center gap-1.5 text-xs font-mono text-theater-gray hover:text-theater-text transition-colors">
-          <BarChart3 className="w-3 h-3" /> MC
-        </button>
-        <button
-          onClick={(e) => { e.stopPropagation(); onDelete(session.id) }}
-          className="flex items-center justify-center px-2 text-theater-red hover:text-red-400 transition-colors"
-          title="Delete session"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
-      </div>
-    </div>
-  )
-}
 
 export default function Dashboard() {
   const [sessions, setSessions] = useState([])
@@ -96,11 +83,10 @@ export default function Dashboard() {
 
   if (loading) return <LoadingSpinner label="Loading THEATER..." />
 
-  const activeSessions = sessions.filter(s => s.status === 'Active')
-  const completedSessions = sessions.filter(s => s.status === 'Complete')
-
   return (
     <div className="p-6 space-y-6 fade-in">
+      <WelcomeBanner />
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -125,41 +111,8 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Active Sessions */}
+        {/* Sessions */}
         <div className="lg:col-span-2 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-theater-text font-semibold font-mono tracking-wider flex items-center gap-2">
-              <Activity className="w-4 h-4 text-theater-green" />
-              Active Sessions
-            </h2>
-            <span className="text-theater-muted text-xs font-mono">{activeSessions.length} active</span>
-          </div>
-
-          {activeSessions.length === 0 ? (
-            <div className="bg-theater-card border border-theater-border rounded-lg p-8 text-center">
-              <Map className="w-8 h-8 text-theater-muted mx-auto mb-3" />
-              <p className="text-theater-gray font-mono text-sm">No active sessions</p>
-              <button
-                onClick={() => navigate('/scenarios/new')}
-                className="mt-3 text-theater-accent-light text-sm font-mono hover:text-theater-text transition-colors"
-              >
-                → Build your first scenario
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {activeSessions.map(s => (
-                <SessionCard
-                  key={s.id}
-                  session={s}
-                  onClick={() => navigate(`/sessions/${s.id}`)}
-                  onDelete={handleDelete}
-                />
-              ))}
-            </div>
-          )}
-
-          {/* All sessions */}
           {sessions.length > 0 && (
             <>
               <h2 className="text-theater-text font-semibold font-mono tracking-wider flex items-center gap-2 pt-2">
