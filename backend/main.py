@@ -3,6 +3,7 @@ import os
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
@@ -87,7 +88,14 @@ def health(db: Session = Depends(get_db)):
     return {"status": "ok", "model": settings.claude_model}
 
 # Serve the React frontend (production: static files are built into ./static)
-# Must be mounted last so API routes take precedence.
+# Assets (JS/CSS) are mounted first; a catch-all returns index.html for all
+# other paths so React Router can handle client-side navigation.
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(_static_dir):
-    app.mount("/", StaticFiles(directory=_static_dir, html=True), name="frontend")
+    _assets_dir = os.path.join(_static_dir, "assets")
+    if os.path.isdir(_assets_dir):
+        app.mount("/assets", StaticFiles(directory=_assets_dir), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        return FileResponse(os.path.join(_static_dir, "index.html"))
