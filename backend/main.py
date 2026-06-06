@@ -1,6 +1,8 @@
 import logging
+import os
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
@@ -76,10 +78,6 @@ app.include_router(monte_carlo.router)
 app.include_router(aar.router)
 app.include_router(admin.router)
 
-@app.get("/")
-def root():
-    return {"status": "THEATER API operational", "version": "1.0.0"}
-
 @app.get("/health")
 def health(db: Session = Depends(get_db)):
     try:
@@ -87,3 +85,9 @@ def health(db: Session = Depends(get_db)):
     except Exception:
         raise HTTPException(503, "Database unavailable")
     return {"status": "ok", "model": settings.claude_model}
+
+# Serve the React frontend (production: static files are built into ./static)
+# Must be mounted last so API routes take precedence.
+_static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.isdir(_static_dir):
+    app.mount("/", StaticFiles(directory=_static_dir, html=True), name="frontend")
