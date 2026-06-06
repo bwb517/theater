@@ -23,12 +23,13 @@ def get_settings():
 
 settings = get_settings()
 
+_is_sqlite = "sqlite" in settings.database_url
 engine = create_engine(
     settings.database_url,
-    connect_args={"check_same_thread": False}
+    connect_args={"check_same_thread": False} if _is_sqlite else {}
 )
 
-if "sqlite" in settings.database_url:
+if _is_sqlite:
     @event.listens_for(engine, "connect")
     def _set_wal(dbapi_connection, connection_record):
         cursor = dbapi_connection.cursor()
