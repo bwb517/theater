@@ -1,0 +1,17 @@
+# Environment — contains API keys, never commit
+backend/.env
+backend/.env.production
+.env
+
+# Python
+__pycache__/
+*.pyc
+venv/
+*.egg-info/
+
+# Database (dev only)
+backend/theater.db
+
+# Frontend build
+frontend/dist/
+frontend/node_modules/

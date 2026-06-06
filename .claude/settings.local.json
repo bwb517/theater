@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m py_compile routers/scenarios.py)",
+      "Bash(python -m py_compile routers/sessions.py)",
+      "Bash(python -m py_compile ai_client.py)",
+      "Bash(ls backend/Dockerfile)",
+      "Bash(cat backend/Dockerfile)",
+      "Bash(cat backend/requirements.txt)"
+    ]
+  }
+}

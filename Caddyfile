@@ -1,0 +1,15 @@
+# Set SITE_ADDRESS to your domain (e.g. theater.example.com) in the caddy
+# container's environment. With a real domain, Caddy auto-provisions and renews
+# a Let's Encrypt TLS cert and redirects HTTP→HTTPS automatically.
+# Falls back to :80 (no TLS) if SITE_ADDRESS is unset — local/dev only.
+{$SITE_ADDRESS::80} {
+    handle /api/* {
+        reverse_proxy backend:8000
+    }
+
+    handle {
+        root * /srv
+        try_files {path} /index.html
+        file_server
+    }
+}

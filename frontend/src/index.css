@@ -1,0 +1,119 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  background-color: #ffffff;
+  color: #171717;
+  font-family: 'Inter', system-ui, sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+/* Leaflet map overrides */
+.leaflet-container {
+  background: #f5f5f5;
+  font-family: 'Inter', sans-serif;
+}
+
+.leaflet-popup-content-wrapper {
+  background: #ffffff;
+  color: #171717;
+  border: 1px solid #e5e5e5;
+  border-radius: 6px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.12);
+}
+
+.leaflet-popup-tip {
+  background: #ffffff;
+}
+
+.leaflet-popup-close-button {
+  color: #737373 !important;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #f5f5f5; }
+::-webkit-scrollbar-thumb { background: #d4d4d4; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #a3a3a3; }
+
+/* Military unit marker */
+.unit-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  border: 2px solid currentColor;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: transform 0.1s;
+  white-space: nowrap;
+  padding: 2px 4px;
+  min-width: 32px;
+  min-height: 24px;
+  text-align: center;
+}
+
+.unit-marker:hover { transform: scale(1.15); z-index: 1000 !important; }
+
+.unit-marker.blue  { background: rgba(37,99,235,0.85);  color: #fff; border-color: #2563eb; }
+.unit-marker.red   { background: rgba(220,38,38,0.85);  color: #fff; border-color: #dc2626; }
+.unit-marker.green { background: rgba(22,163,74,0.85);  color: #fff; border-color: #16a34a; }
+.unit-marker.white { background: rgba(229,229,229,0.85); color: #171717; border-color: #a3a3a3; }
+
+/* Classification banner */
+.classification-banner {
+  background: #f5f5f5;
+  color: #525252;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  padding: 2px 0;
+  letter-spacing: 0.05em;
+  border: 1px solid #e5e5e5;
+}
+
+/* Fade-in animation */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-in { animation: fadeIn 0.25s ease-out; }
+
+/* Pulse for active/alert states */
+@keyframes pulse-accent {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(23,23,23,0.2); }
+  50% { box-shadow: 0 0 0 6px rgba(23,23,23,0); }
+}
+.pulse-blue { animation: pulse-accent 2s infinite; }
+
+/* Subtle grid background pattern */
+.tac-grid {
+  background-image: linear-gradient(rgba(0,0,0,0.04) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(0,0,0,0.04) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Status badge variants */
+.badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; font-family: 'IBM Plex Mono', monospace; }
+.badge-active  { background: rgba(22,163,74,0.1);   color: #15803d; border: 1px solid rgba(22,163,74,0.3); }
+.badge-paused  { background: rgba(202,138,4,0.1);   color: #a16207; border: 1px solid rgba(202,138,4,0.3); }
+.badge-complete{ background: rgba(99,102,241,0.1);  color: #4f46e5; border: 1px solid rgba(99,102,241,0.3); }
+.badge-setup   { background: rgba(115,115,115,0.1); color: #525252; border: 1px solid rgba(115,115,115,0.3); }
+.badge-red     { background: rgba(220,38,38,0.1);   color: #dc2626; border: 1px solid rgba(220,38,38,0.3); }
+.badge-blue    { background: rgba(37,99,235,0.1);   color: #2563eb; border: 1px solid rgba(37,99,235,0.3); }
+
+/* Strength indicators */
+.strength-full     { color: #16a34a; }
+.strength-degraded { color: #ca8a04; }
+.strength-critical { color: #dc2626; }

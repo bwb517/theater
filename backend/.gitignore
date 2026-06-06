@@ -1,0 +1,6 @@
+# Environment — contains live API keys
+.env
+theater.db
+__pycache__/
+*.pyc
+venv/
