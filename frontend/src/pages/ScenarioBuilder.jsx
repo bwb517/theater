@@ -279,11 +279,6 @@ export default function ScenarioBuilder() {
   const [expandedFactions, setExpandedFactions] = useState({})
   const [mapUnits, setMapUnits] = useState([])
 
-  // Launch modal state
-  const [showLaunchModal, setShowLaunchModal] = useState(false)
-  const [launchDays, setLaunchDays] = useState(30)
-  const [launchTurns, setLaunchTurns] = useState(8)
-
   useEffect(() => {
     if (id) {
       scenariosApi.get(id).then(r => {
@@ -351,26 +346,8 @@ export default function ScenarioBuilder() {
     }
   }
 
-  // Parse total game days from a timeframe string like "72 hours" or "30-day"
-  function parseDaysFromTimeframe(tf = '') {
-    const hourMatch = tf.match(/(\d+)\s*hour/i)
-    if (hourMatch) return Math.round(parseInt(hourMatch[1]) / 24) || 1
-    const dayMatch = tf.match(/(\d+)\s*[- ]?day/i)
-    if (dayMatch) return parseInt(dayMatch[1])
-    return 30
-  }
-
-  const handleLaunch = () => {
+  const handleLaunch = async () => {
     if (!id && !scenario) return
-    const defaultDays = parseDaysFromTimeframe(scenario?.timeframe)
-    const defaultTurns = scenario?.win_conditions?.duration_turns || 8
-    setLaunchDays(defaultDays)
-    setLaunchTurns(defaultTurns)
-    setShowLaunchModal(true)
-  }
-
-  const handleLaunchConfirm = async () => {
-    setShowLaunchModal(false)
     const scenarioId = id || (await scenariosApi.create({
       title: scenario.title, scenario_type: scenario.scenario_type,
       timeframe: scenario.timeframe, geography: scenario.geography || {},
@@ -379,12 +356,11 @@ export default function ScenarioBuilder() {
       ai_notes: scenario.ai_notes || '', is_template: false
     })).data.id
 
-    const hoursPerTurn = Math.round((launchDays * 24) / launchTurns) || 12
     const res = await sessionsApi.create({
       scenario_id: scenarioId,
       title: scenario?.title || 'New Session',
-      max_turns: launchTurns,
-      time_per_turn_hours: hoursPerTurn,
+      max_turns: scenario?.win_conditions?.duration_turns || 6,
+      time_per_turn_hours: 0,  // backend auto-derives from scenario timeframe
       faction_assignments: []
     })
     navigate(`/sessions/${res.data.id}`)
@@ -615,76 +591,6 @@ export default function ScenarioBuilder() {
         </div>
       </div>
 
-      {/* Launch config modal */}
-      {showLaunchModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-theater-card border border-theater-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5">
-            <h2 className="text-theater-text font-mono font-bold text-base tracking-wider flex items-center gap-2">
-              <Play className="w-4 h-4 text-theater-accent-light" />
-              SESSION CONFIGURATION
-            </h2>
-
-            <div className="space-y-4">
-              {/* Total duration */}
-              <div>
-                <label className="block text-xs font-mono text-theater-muted tracking-wider mb-1">
-                  TOTAL GAME DURATION (days)
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={365}
-                  value={launchDays}
-                  onChange={e => setLaunchDays(Math.max(1, parseInt(e.target.value) || 1))}
-                  className="w-full bg-theater-bg border border-theater-border rounded px-3 py-2 text-theater-text text-sm font-mono focus:outline-none focus:border-theater-accent"
-                />
-              </div>
-
-              {/* Number of turns */}
-              <div>
-                <label className="block text-xs font-mono text-theater-muted tracking-wider mb-2">
-                  NUMBER OF TURNS — <span className="text-theater-accent-light">{launchTurns}</span>
-                </label>
-                <input
-                  type="range"
-                  min={2}
-                  max={20}
-                  value={launchTurns}
-                  onChange={e => setLaunchTurns(parseInt(e.target.value))}
-                  className="w-full accent-theater-accent"
-                />
-                <div className="flex justify-between text-xs font-mono text-theater-muted mt-1">
-                  <span>2</span><span>20</span>
-                </div>
-              </div>
-
-              {/* Derived hours per turn */}
-              <div className="bg-theater-bg border border-theater-border rounded px-3 py-2 flex items-center justify-between">
-                <span className="text-xs font-mono text-theater-muted">Hours per turn</span>
-                <span className="text-xs font-mono text-theater-accent-light font-bold">
-                  {Math.round((launchDays * 24) / launchTurns) || 12}h
-                </span>
-              </div>
-            </div>
-
-            <div className="flex gap-3 pt-1">
-              <button
-                onClick={() => setShowLaunchModal(false)}
-                className="flex-1 border border-theater-border text-theater-muted hover:text-theater-text px-4 py-2 rounded text-xs font-mono transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleLaunchConfirm}
-                className="flex-1 bg-theater-accent hover:bg-theater-accent-light text-white px-4 py-2 rounded text-xs font-mono font-semibold transition-colors flex items-center justify-center gap-2"
-              >
-                <Play className="w-3.5 h-3.5" />
-                Launch ({launchTurns} turns)
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
