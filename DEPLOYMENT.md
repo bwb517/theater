@@ -149,7 +149,7 @@ This takes 3–5 minutes. You'll see logs in the Railway dashboard. Once you see
 | `ANTHROPIC_API_KEY` | `sk-ant-...` | Generate a **new** key from [console.anthropic.com](https://console.anthropic.com/settings/keys) (not the dev one) |
 | `CLAUDE_MODEL` | `claude-sonnet-4-6` | Leave as-is |
 | `SECRET_KEY` | Your generated 64-byte key | Generate via: `python -c "import secrets; print(secrets.token_urlsafe(64))"` Run locally and copy the output |
-| `DATABASE_URL` | `sqlite:///./data/theater.db` | SQLite for beta; change to PostgreSQL if you expect heavy concurrent use |
+| `DATABASE_URL` | (auto-injected by Railway) | Railway sets this automatically when PostgreSQL is provisioned — do not override |
 | `FRONTEND_URL` | `https://theater-wargame.com` | Use **HTTPS** and your domain |
 | `SITE_ADDRESS` | `theater-wargame.com` | Tells Caddy your domain (enables auto-TLS) |
 | `TOKEN_BUDGET` | `1000000` | Optional; informational token spend cap |
@@ -169,7 +169,7 @@ The database starts empty. You need to:
 
 ### 6a. Seed the Database
 
-In Railway, click your **backend** service → **Deploy** → **Deployments** → latest one → **View Logs** (or wait for logs to stream).
+In Railway, click your **backend** service → **Deployments** → latest one → **View Logs** (or wait for logs to stream).
 
 Once deployment is stable, click the **Terminal** tab and run:
 
@@ -205,21 +205,18 @@ You need to manually update the role to `admin` since registration hardcoded it 
 In Railway **backend** terminal:
 
 ```bash
-sqlite3 data/theater.db
+psql $DATABASE_URL
 ```
 
 Then:
 
 ```sql
 UPDATE users SET role = 'admin' WHERE username = 'admin';
-SELECT * FROM users WHERE username = 'admin';
-.quit
+SELECT username, role FROM users WHERE username = 'admin';
+\q
 ```
 
-You should see:
-```
-...|admin|admin@...|...|admin|1
-```
+You should see `role = admin` in the output.
 
 Done. Log out and back in — you'll now have admin access (user list, session audit, stats).
 
@@ -276,14 +273,6 @@ caddy | Obtaining certificate...
 caddy | Certificate obtained
 ```
 
-### Database locked errors during concurrent play
-
-SQLite can handle 3–5 concurrent players. If beta grows, upgrade to PostgreSQL:
-
-1. Provision a PostgreSQL database (Railway can add one with a click)
-2. Change `DATABASE_URL` to the PostgreSQL connection string
-3. Redeploy
-
 ### "403 CORS error" when beta testers try to play
 
 Confirm `FRONTEND_URL=https://your-domain.com` in Railway environment vars. It must match the domain users visit exactly (with HTTPS).
@@ -304,7 +293,10 @@ All are in place. If still failing, check:
 
 Check your token spend:
 1. Open backend terminal
-2. Run: `sqlite3 data/theater.db "SELECT function_name, SUM(input_tokens) as input, SUM(output_tokens) as output FROM token_usage GROUP BY function_name;"`
+2. Run:
+```bash
+psql $DATABASE_URL -c "SELECT function_name, SUM(input_tokens) AS input, SUM(output_tokens) AS output FROM token_usage GROUP BY function_name;"
+```
 
 You'll see per-function token usage. If input tokens spike, a beta tester may have found a loop or runaway scenario.
 
@@ -315,11 +307,10 @@ You'll see per-function token usage. If input tokens spike, a beta tester may ha
 Once beta is running, consider:
 
 1. **Enable password reset** — add an email service (Mailgun, SendGrid)
-2. **Postgres upgrade** — if concurrent players exceed SQLite limits
-3. **Public /docs disable** — in `backend/main.py`, remove or gate Swagger UI
-4. **Per-user spend cap** — track token usage per user; prevent abuse
-5. **Error logging** — add Sentry or similar to catch bugs from testers
-6. **Analytics** — Plausible or Mixpanel to track feature usage
+2. **Public /docs disable** — in `backend/main.py`, remove or gate Swagger UI
+3. **Per-user spend cap** — track token usage per user; prevent abuse
+4. **Error logging** — add Sentry or similar to catch bugs from testers
+5. **Analytics** — Plausible or Mixpanel to track feature usage
 
 ---
 

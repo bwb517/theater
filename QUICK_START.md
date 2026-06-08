@@ -73,7 +73,7 @@ https://theater-production-abc123.up.railway.app
 ANTHROPIC_API_KEY = sk-ant-xxx-your-new-key-from-console.anthropic.com
 CLAUDE_MODEL = claude-sonnet-4-6
 SECRET_KEY = AIT24fM31MHZmvbplVfIrA-mzfni2Jw2AiC6YpMakFObb0mL-AUC7gbTberP8qTTphRLr5NFzCmiqeRdOZ4DSw
-DATABASE_URL = sqlite:///./data/theater.db
+DATABASE_URL = (Railway injects this automatically when PostgreSQL is provisioned — leave blank)
 FRONTEND_URL = https://your-domain.com
 SITE_ADDRESS = your-domain.com
 TOKEN_BUDGET = 1000000
@@ -148,18 +148,18 @@ Once the domain is live:
 3. Run:
 
 ```bash
-sqlite3 data/theater.db
+psql $DATABASE_URL
 ```
 
-At the `sqlite>` prompt, type:
+At the `postgres=#` prompt, type:
 
 ```sql
 UPDATE users SET role = 'admin' WHERE username = 'admin';
-SELECT * FROM users WHERE username = 'admin';
-.quit
+SELECT username, role FROM users WHERE username = 'admin';
+\q
 ```
 
-You should see output showing `role = admin`. 
+You should see output showing `role = admin`.
 
 Log out and back in — you'll now have **Admin** tab access.
 
@@ -235,7 +235,6 @@ Full details in `DEPLOYMENT.md` troubleshooting section.
 
 - Rotate API key regularly
 - Monitor token usage (check `TokenUsage` table)
-- Upgrade to PostgreSQL if >10 concurrent players
 - Add password reset flow
 - Disable public `/docs` endpoint (hide API surface)
 

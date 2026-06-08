@@ -38,7 +38,7 @@ chmod +x start_backend.sh
 This will:
 - Create a Python virtual environment
 - Install all dependencies
-- Seed the SQLite database with demo data (5 scenario templates, demo session, sample users)
+- Seed the database with demo data (5 scenario templates, demo session, sample users)
 - Start the FastAPI server on **http://localhost:8000**
 
 ### 3. Start the frontend (second terminal)
@@ -126,7 +126,7 @@ theater/
 | Charts | Recharts |
 | Icons | lucide-react |
 | Backend | Python 3.10+, FastAPI, Uvicorn |
-| ORM | SQLAlchemy 2 (async-compatible), SQLite |
+| ORM | SQLAlchemy 2, PostgreSQL (prod) / SQLite (dev) |
 | Auth | python-jose (JWT), passlib (bcrypt) |
 | AI | Anthropic Python SDK (`claude-sonnet-4-6`) |
 | Simulation | numpy, scipy |
@@ -348,9 +348,9 @@ Running `seed_data.py` populates:
 
 Change `DATABASE_URL` in `.env`:
 ```
-DATABASE_URL=postgresql+asyncpg://user:password@localhost/theater
+DATABASE_URL=postgresql://user:password@localhost/theater
 ```
-Add `asyncpg` to `requirements.txt`.
+`psycopg2-binary` is already in `requirements.txt` — no additional packages needed.
 
 ### Deploying to Production
 
