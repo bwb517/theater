@@ -9,8 +9,10 @@ __pycache__/
 venv/
 *.egg-info/
 
-# Database (dev only)
+# Database (dev only) — includes SQLite WAL/shared-memory sidecars
 backend/theater.db
+backend/theater.db-shm
+backend/theater.db-wal
 
 # Frontend build
 frontend/dist/
