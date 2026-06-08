@@ -72,7 +72,9 @@ async def generate_aar(
             final_state=final_state,
             monte_carlo=mc_data,
             gm_notes=req.gm_notes or "",
-            verbosity=req.verbosity
+            verbosity=req.verbosity,
+            user_id=user.id if user else None,
+            session_id=session_id,
         )
     except Exception as e:
         raise HTTPException(500, f"AAR generation failed: {str(e)}")

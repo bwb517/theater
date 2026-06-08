@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, Text, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, String, Integer, Float, Text, Boolean, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import uuid
@@ -109,4 +109,9 @@ class TokenUsage(Base):
     output_tokens = Column(Integer, default=0)
     cache_read_tokens = Column(Integer, default=0)
     cache_write_tokens = Column(Integer, default=0)
+    # Attribution + cost (added via migration; nullable for legacy rows)
+    user_id = Column(String, ForeignKey("users.id"), nullable=True)
+    session_id = Column(String, ForeignKey("game_sessions.id"), nullable=True)
+    total_cost_usd = Column(Float, default=0.0)
+    claude_model = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

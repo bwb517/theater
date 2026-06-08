@@ -62,7 +62,11 @@ def serialize_scenario(s: models.Scenario) -> dict:
 async def generate_scenario(request: Request, req: GenerateRequest, user=Depends(get_current_user)):
     """Generate a scenario from natural language using Claude."""
     try:
-        scenario_data = await ai_client.generate_scenario(req.prompt, verbosity=req.verbosity)
+        scenario_data = await ai_client.generate_scenario(
+            req.prompt,
+            verbosity=req.verbosity,
+            user_id=user.id if user else None,
+        )
         return {"success": True, "scenario": scenario_data}
     except Exception as e:
         raise HTTPException(500, f"AI generation failed: {str(e)}")

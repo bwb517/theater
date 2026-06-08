@@ -18,3 +18,4 @@ python-dotenv==1.0.1
 aiofiles==24.1.0
 slowapi==0.1.9
 psycopg2-binary==2.9.9
+pytest==8.3.4
