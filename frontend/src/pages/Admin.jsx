@@ -2,7 +2,55 @@ import { useState, useEffect } from 'react'
 import { adminApi, authApi } from '../api/client'
 import { LoadingSpinner } from '../components/LoadingSpinner'
 import { StatusBadge } from '../components/StatusBadge'
-import { Shield, Users, Activity, Database, RefreshCw, AlertCircle, KeyRound, Check, X } from 'lucide-react'
+import { Shield, Users, Activity, Database, RefreshCw, AlertCircle, KeyRound, Check, X, DollarSign, Coins, Zap, Cpu } from 'lucide-react'
+import {
+  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
+} from 'recharts'
+
+const CHART_COLORS = ['#171717', '#dc2626', '#a16207', '#16a34a', '#7c3aed', '#0891b2', '#db2777']
+const usd = n => `$${(Number(n) || 0).toFixed(4)}`
+const usd2 = n => `$${(Number(n) || 0).toFixed(2)}`
+const num = n => (Number(n) || 0).toLocaleString()
+
+const AXIS_TICK = { fill: '#737373', fontSize: 9, fontFamily: 'IBM Plex Mono' }
+const TOOLTIP_STYLE = { background: '#ffffff', border: '1px solid #e5e5e5', borderRadius: 6, color: '#171717', fontFamily: 'IBM Plex Mono', fontSize: 11 }
+
+function CostBarChart({ data, xKey }) {
+  if (!data?.length) return <p className="text-theater-muted text-xs font-mono py-8 text-center">No data yet.</p>
+  return (
+    <ResponsiveContainer width="100%" height={240}>
+      <BarChart data={data} margin={{ left: -10, bottom: 30 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
+        <XAxis dataKey={xKey} tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: '#e5e5e5' }}
+          angle={-25} textAnchor="end" interval={0} height={50} />
+        <YAxis tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: '#e5e5e5' }}
+          tickFormatter={v => `$${v}`} />
+        <Tooltip contentStyle={TOOLTIP_STYLE}
+          formatter={(v, _n, p) => [`${usd(v)} · ${num(p.payload.total_tokens)} tok · ${num(p.payload.calls)} calls`, 'Cost']} />
+        <Bar dataKey="cost_usd" radius={[3, 3, 0, 0]}>
+          {data.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
+
+function DailySpendChart({ data }) {
+  if (!data?.length) return <p className="text-theater-muted text-xs font-mono py-8 text-center">No data yet.</p>
+  return (
+    <ResponsiveContainer width="100%" height={240}>
+      <LineChart data={data} margin={{ left: -10 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
+        <XAxis dataKey="date" tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: '#e5e5e5' }} />
+        <YAxis tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: '#e5e5e5' }}
+          tickFormatter={v => `$${v}`} />
+        <Tooltip contentStyle={TOOLTIP_STYLE}
+          formatter={(v, _n, p) => [`${usd(v)} · ${num(p.payload.total_tokens)} tok`, 'Spend']} />
+        <Line type="monotone" dataKey="cost_usd" stroke="#dc2626" strokeWidth={2} dot={{ r: 2 }} />
+      </LineChart>
+    </ResponsiveContainer>
+  )
+}
 
 function StatCard({ label, value, sub, icon: Icon, color = 'text-theater-accent-light' }) {
   return (
@@ -78,6 +126,8 @@ export default function Admin() {
   const [stats, setStats] = useState(null)
   const [users, setUsers] = useState([])
   const [sessions, setSessions] = useState([])
+  const [tokenStats, setTokenStats] = useState(null)
+  const [tokenByUser, setTokenByUser] = useState(null)
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState('overview')
   const [error, setError] = useState('')
@@ -99,6 +149,18 @@ export default function Admin() {
     } finally {
       setLoading(false)
     }
+    // Token stats are admin-only; fetch separately so a 403 never blanks the page
+    try {
+      const [tsRes, tuRes] = await Promise.all([
+        adminApi.tokenStats(),
+        adminApi.tokenStatsByUser(),
+      ])
+      setTokenStats(tsRes.data)
+      setTokenByUser(tuRes.data)
+    } catch {
+      setTokenStats(null)
+      setTokenByUser(null)
+    }
   }
 
   useEffect(() => { load() }, [])
@@ -107,6 +169,7 @@ export default function Admin() {
 
   const TABS = [
     { key: 'overview', label: 'Overview' },
+    { key: 'tokens', label: 'Tokens' },
     { key: 'users', label: `Users (${users.length})` },
     { key: 'sessions', label: `Sessions (${sessions.length})` },
   ]
@@ -217,6 +280,81 @@ export default function Admin() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Tokens */}
+      {tab === 'tokens' && (
+        tokenStats ? (
+          <div className="space-y-6">
+            {/* Summary cards */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <StatCard label="Total Spend" value={usd2(tokenStats.totals.cost_usd)} icon={DollarSign} color="text-theater-red" />
+              <StatCard label="Total Tokens" value={num(tokenStats.totals.total_tokens)} icon={Coins} sub={`${num(tokenStats.totals.calls)} API calls`} />
+              <StatCard label="Cache Reads" value={num(tokenStats.totals.cache_read_tokens)} icon={Zap} color="text-theater-green" sub="billed at ~10% of input" />
+              <StatCard label="Token Budget" value={num(tokenStats.totals.token_budget)} icon={Cpu} sub="informational" />
+            </div>
+
+            {/* Daily spend */}
+            <div className="bg-theater-card border border-theater-border rounded-lg p-4">
+              <h3 className="text-theater-text font-mono font-semibold text-sm mb-4 flex items-center gap-2">
+                <DollarSign className="w-4 h-4 text-theater-red" /> Daily Spend (USD)
+              </h3>
+              <DailySpendChart data={tokenStats.daily} />
+            </div>
+
+            {/* Cost per function + per scenario type */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="bg-theater-card border border-theater-border rounded-lg p-4">
+                <h3 className="text-theater-text font-mono font-semibold text-sm mb-4">Cost per Function</h3>
+                <CostBarChart data={tokenStats.per_function} xKey="function" />
+              </div>
+              <div className="bg-theater-card border border-theater-border rounded-lg p-4">
+                <h3 className="text-theater-text font-mono font-semibold text-sm mb-4">Cost per Scenario Type</h3>
+                <CostBarChart data={tokenStats.per_scenario_type} xKey="scenario_type" />
+              </div>
+            </div>
+
+            {/* Per-user table */}
+            <div className="bg-theater-card border border-theater-border rounded-lg overflow-hidden">
+              <h3 className="text-theater-text font-mono font-semibold text-sm px-4 pt-4 pb-2">
+                Spend by User <span className="text-theater-muted font-normal">· month to date as of {tokenByUser?.month_start ? new Date(tokenByUser.month_start).toLocaleDateString() : '—'}</span>
+              </h3>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-theater-border bg-theater-bg">
+                    <th className="text-left py-3 px-4 text-theater-muted font-mono">User</th>
+                    <th className="text-left py-3 px-4 text-theater-muted font-mono">Tier</th>
+                    <th className="text-right py-3 px-4 text-theater-muted font-mono">Lifetime Cost</th>
+                    <th className="text-right py-3 px-4 text-theater-muted font-mono">Lifetime Tokens</th>
+                    <th className="text-right py-3 px-4 text-theater-muted font-mono">This Month</th>
+                    <th className="text-right py-3 px-4 text-theater-muted font-mono">Calls</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(tokenByUser?.users || []).map(u => (
+                    <tr key={u.user_id} className="border-b border-theater-border/40 hover:bg-theater-card">
+                      <td className="py-3 px-4 text-theater-text font-semibold">{u.username}</td>
+                      <td className="py-3 px-4 font-mono text-theater-gray">{u.tier}</td>
+                      <td className="py-3 px-4 font-mono text-theater-text text-right">{usd(u.cost_usd)}</td>
+                      <td className="py-3 px-4 font-mono text-theater-gray text-right">{num(u.total_tokens)}</td>
+                      <td className="py-3 px-4 font-mono text-theater-accent-light text-right">{usd(u.month_cost_usd)}</td>
+                      <td className="py-3 px-4 font-mono text-theater-muted text-right">{num(u.calls)}</td>
+                    </tr>
+                  ))}
+                  {!(tokenByUser?.users || []).length && (
+                    <tr><td colSpan={6} className="py-6 text-center text-theater-muted font-mono">No attributed usage yet.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-theater-card border border-theater-border rounded-lg p-12 text-center">
+            <Coins className="w-12 h-12 text-theater-muted mx-auto mb-4" />
+            <p className="text-theater-gray font-mono">No token usage data available yet, or insufficient permissions.</p>
+            <p className="text-theater-muted text-xs mt-2">Usage is recorded as AI features (scenario generation, red team, adjudication, Monte Carlo, AAR) are run.</p>
+          </div>
+        )
       )}
 
       {/* Users */}
