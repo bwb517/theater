@@ -195,7 +195,7 @@ export default function OperationalMap({
   }, [onUnitClick])
 
   return (
-    <div style={{ height, width: '100%', position: 'relative' }}>
+    <div style={{ height, width: '100%', position: 'relative', zIndex: 0 }}>
       {/* Destination-pick mode banner */}
       {pickingDestination && (
         <div style={{
