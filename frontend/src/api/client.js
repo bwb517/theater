@@ -87,5 +87,7 @@ export const adminApi = {
   users: () => api.get('/admin/users'),
   sessions: () => api.get('/admin/sessions'),
   tokenUsage: () => api.get('/admin/token-usage'),
+  tokenStats: () => api.get('/admin/token-stats'),
+  tokenStatsByUser: () => api.get('/admin/token-stats/by-user'),
   resetPassword: (userId, newPassword) => api.post(`/admin/users/${userId}/reset-password`, { new_password: newPassword }),
 }

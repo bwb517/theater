@@ -101,7 +101,9 @@ async def generate_red_team_moves(
             turn_history=turn_logs,
             current_turn=session.current_turn,
             injects=req.injects,
-            verbosity=req.verbosity
+            verbosity=req.verbosity,
+            user_id=user.id if user else None,
+            session_id=session_id,
         )
     except Exception as e:
         raise HTTPException(500, f"Red Team AI failed: {str(e)}")
@@ -213,7 +215,9 @@ async def adjudicate_turn(
             red_moves=red_moves,
             current_game_state=game_state,
             turn_number=turn_number,
-            verbosity=req.verbosity
+            verbosity=req.verbosity,
+            user_id=user.id if user else None,
+            session_id=session_id,
         )
     except Exception as e:
         raise HTTPException(500, f"Adjudication failed: {str(e)}")

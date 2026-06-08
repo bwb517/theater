@@ -18,28 +18,43 @@ log = logging.getLogger("theater")
 # Create all tables
 models.Base.metadata.create_all(bind=engine)
 
-# Add columns introduced after initial schema
+# Add columns introduced after initial schema.
+# Each entry maps a table to {column_name: sql_type}. REAL/DOUBLE picks the
+# right floating-point type per backend; everything else is TEXT.
+_MIGRATIONS = {
+    "game_sessions": {
+        "ai_personality_overrides": "TEXT",
+        "previous_game_state": "TEXT",
+    },
+    "token_usage": {
+        "user_id": "TEXT",
+        "session_id": "TEXT",
+        "total_cost_usd": "REAL" if _is_sqlite else "DOUBLE PRECISION",
+        "claude_model": "TEXT",
+    },
+}
+
 def _run_migrations():
-    _cols = ("ai_personality_overrides", "previous_game_state")
     with engine.connect() as conn:
-        if _is_sqlite:
-            # SQLite: use PRAGMA to list existing columns
-            result = conn.execute(text("PRAGMA table_info(game_sessions)"))
-            existing = {row[1] for row in result}
-            for col in _cols:
-                if col not in existing:
-                    conn.execute(text(f"ALTER TABLE game_sessions ADD COLUMN {col} TEXT"))
-                    conn.commit()
-        else:
-            # PostgreSQL: use information_schema to check column existence
-            for col in _cols:
-                result = conn.execute(text(
-                    "SELECT 1 FROM information_schema.columns "
-                    "WHERE table_name = 'game_sessions' AND column_name = :col"
-                ), {"col": col})
-                if not result.fetchone():
-                    conn.execute(text(f"ALTER TABLE game_sessions ADD COLUMN {col} TEXT"))
-                    conn.commit()
+        for table, cols in _MIGRATIONS.items():
+            if _is_sqlite:
+                # SQLite: use PRAGMA to list existing columns
+                result = conn.execute(text(f"PRAGMA table_info({table})"))
+                existing = {row[1] for row in result}
+                for col, col_type in cols.items():
+                    if col not in existing:
+                        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
+                        conn.commit()
+            else:
+                # PostgreSQL: use information_schema to check column existence
+                for col, col_type in cols.items():
+                    result = conn.execute(text(
+                        "SELECT 1 FROM information_schema.columns "
+                        "WHERE table_name = :table AND column_name = :col"
+                    ), {"table": table, "col": col})
+                    if not result.fetchone():
+                        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
+                        conn.commit()
 
 _run_migrations()
 

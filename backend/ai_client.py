@@ -12,6 +12,7 @@ from html.parser import HTMLParser
 import anthropic
 from database import settings, SessionLocal
 import models as _models
+import pricing
 
 logger = logging.getLogger(__name__)
 
@@ -30,22 +31,53 @@ def _response_text(response) -> str:
         logger.warning("AI response was truncated (max_tokens reached). JSON may be incomplete.")
     return text
 
-def _log_tokens(function_name: str, usage) -> None:
+def _log_tokens(
+    function_name: str,
+    usage,
+    *,
+    user_id: str | None = None,
+    session_id: str | None = None,
+    model: str | None = None,
+) -> None:
+    """Persist a single Claude call's token usage + computed USD cost.
+
+    Best-effort: any failure here is swallowed so a logging problem can never
+    break the actual AI request. `model` defaults to the configured CLAUDE_MODEL,
+    which is also what determines the per-token pricing.
+    """
+    db = None
     try:
+        input_tokens = getattr(usage, "input_tokens", 0) or 0
+        output_tokens = getattr(usage, "output_tokens", 0) or 0
+        cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+        cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        claude_model = model or settings.claude_model
+
         db = SessionLocal()
         record = _models.TokenUsage(
             function_name=function_name,
-            input_tokens=getattr(usage, "input_tokens", 0),
-            output_tokens=getattr(usage, "output_tokens", 0),
-            cache_read_tokens=getattr(usage, "cache_read_input_tokens", 0),
-            cache_write_tokens=getattr(usage, "cache_creation_input_tokens", 0),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read,
+            cache_write_tokens=cache_write,
+            user_id=user_id,
+            session_id=session_id,
+            claude_model=claude_model,
+            total_cost_usd=pricing.compute_cost(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_creation_tokens=cache_write,
+                cache_read_tokens=cache_read,
+                model=claude_model,
+            ),
         )
         db.add(record)
         db.commit()
     except Exception:
-        pass
+        logger.exception("Failed to log token usage for %s", function_name)
     finally:
-        db.close()
+        if db is not None:
+            db.close()
 
 def extract_json(text: str) -> dict | list:
     """Extract JSON from Claude response, handling markdown code blocks and preamble text."""
@@ -263,7 +295,12 @@ SCENARIO_SCHEMA = """{
   "ai_notes": "string (Claude analysis: key dynamics, historical analogues, likely friction points, designer intent)"
 }"""
 
-async def generate_scenario(user_prompt: str, verbosity: int = 2) -> dict:
+async def generate_scenario(
+    user_prompt: str,
+    verbosity: int = 2,
+    user_id: str | None = None,
+    session_id: str | None = None,
+) -> dict:
     client = get_client()
     response = await client.messages.create(
         model=settings.claude_model,
@@ -288,7 +325,7 @@ Requirements:
 Return ONLY the JSON object, nothing else.{_verbosity_instruction(verbosity)}"""
         }]
     )
-    _log_tokens("generate_scenario", response.usage)
+    _log_tokens("generate_scenario", response.usage, user_id=user_id, session_id=session_id)
     return extract_json(_response_text(response))
 
 
@@ -296,7 +333,7 @@ Return ONLY the JSON object, nothing else.{_verbosity_instruction(verbosity)}"""
 # MODULE 2: RED TEAM ENGINE
 # ─────────────────────────────────────────────────────────────────────────────
 
-RED_TEAM_SYSTEM = """You are the AI commander for {faction_name}, an AI-controlled faction in a professional wargaming exercise. Your personality: {personality}.
+RED_TEAM_SYSTEM = """You are the AI commander for an AI-controlled faction in a professional wargaming exercise. Your specific faction identity and personality are provided in the turn briefing below — adopt them fully.
 
 PERSONALITY GUIDANCE:
 - Aggressive: Accept 30%+ casualties for decisive results. Always look for offensive opportunities. Strike when the enemy is off-balance.
@@ -367,15 +404,16 @@ async def generate_red_team_moves(
     turn_history: list,
     current_turn: int,
     injects: list,
-    verbosity: int = 2
+    verbosity: int = 2,
+    user_id: str | None = None,
+    session_id: str | None = None,
 ) -> dict:
     client = get_client()
     personality = faction.get("ai_personality", "Opportunistic")
 
-    system = RED_TEAM_SYSTEM.format(
-        faction_name=faction["name"],
-        personality=personality
-    )
+    # Keep the system prompt static so it caches across factions/personalities.
+    # The faction identity + personality go in the dynamic turn briefing below.
+    system = RED_TEAM_SYSTEM
 
     planning_assumptions = scenario.get("situation", {}).get("planning_assumptions", {})
     pa_context = f"\nPLANNING ASSUMPTIONS (respect these constraints in all actions):\n{json.dumps(planning_assumptions, indent=2)}\n" if planning_assumptions else ""
@@ -386,7 +424,10 @@ async def generate_red_team_moves(
         for t in (turn_history[-5:] if turn_history else [])
     ]
 
-    context = f"""SCENARIO: {scenario.get('title')}
+    context = f"""YOU ARE: {faction.get('name')} ({faction.get('faction_id')})
+YOUR PERSONALITY: {personality} — apply the matching guidance from your system instructions.
+
+SCENARIO: {scenario.get('title')}
 TIMEFRAME: {scenario.get('timeframe')}
 GEOGRAPHY: {json.dumps(scenario.get('geography', {}), indent=2)}
 {pa_context}
@@ -422,7 +463,7 @@ Analyze the situation and generate your faction's moves for Turn {current_turn}.
         ],
         messages=[{"role": "user", "content": context}]
     )
-    _log_tokens("generate_red_team_moves", response.usage)
+    _log_tokens("generate_red_team_moves", response.usage, user_id=user_id, session_id=session_id)
     result = extract_json(response.content[0].text)
     result["turn_number"] = current_turn
     result["faction_id"] = faction["faction_id"]
@@ -514,7 +555,9 @@ async def adjudicate_turn(
     red_moves: list,
     current_game_state: dict,
     turn_number: int,
-    verbosity: int = 2
+    verbosity: int = 2,
+    user_id: str | None = None,
+    session_id: str | None = None,
 ) -> dict:
     client = get_client()
     planning_assumptions = scenario.get("situation", {}).get("planning_assumptions", {})
@@ -545,7 +588,7 @@ Adjudicate this turn. Set "turn_number" to {turn_number}. Return JSON matching t
         ],
         messages=[{"role": "user", "content": prompt}]
     )
-    _log_tokens("adjudicate_turn", response.usage)
+    _log_tokens("adjudicate_turn", response.usage, user_id=user_id, session_id=session_id)
     return extract_json(_response_text(response))
 
 
@@ -794,6 +837,8 @@ async def _run_monte_carlo_batch(
     run_offset: int,
     verbosity: int,
     is_primary: bool = False,
+    user_id: str | None = None,
+    session_id: str | None = None,
 ) -> dict:
     """Run a single batch of Monte Carlo simulations.
 
@@ -832,11 +877,18 @@ For each simulation, vary one or more of these factors from the baseline above:
         ],
         messages=[{"role": "user", "content": prompt}]
     )
-    _log_tokens("run_monte_carlo_batch", response.usage)
+    _log_tokens("run_monte_carlo_batch", response.usage, user_id=user_id, session_id=session_id)
     return extract_json(_response_text(response))
 
 
-async def run_monte_carlo(scenario: dict, session_state: dict = None, num_runs: int = 10, verbosity: int = 2) -> dict:
+async def run_monte_carlo(
+    scenario: dict,
+    session_state: dict = None,
+    num_runs: int = 10,
+    verbosity: int = 2,
+    user_id: str | None = None,
+    session_id: str | None = None,
+) -> dict:
     client = get_client()
     slim_scenario = _slim_scenario_for_mc(scenario)
 
@@ -861,6 +913,8 @@ async def run_monte_carlo(scenario: dict, session_state: dict = None, num_runs: 
             offset,
             verbosity,
             is_primary=(offset == 0),
+            user_id=user_id,
+            session_id=session_id,
         )
         for offset in range(0, num_runs, _MONTE_CARLO_BATCH_SIZE)
     ]
@@ -885,7 +939,9 @@ async def generate_aar(
     final_state: dict,
     monte_carlo: dict = None,
     gm_notes: str = "",
-    verbosity: int = 2
+    verbosity: int = 2,
+    user_id: str | None = None,
+    session_id: str | None = None,
 ) -> dict:
     client = get_client()
 
@@ -1005,7 +1061,7 @@ Return ONLY JSON. Write analytically — this is a professional deliverable.{_ve
         system=[{"type": "text", "text": AAR_SYSTEM, "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user", "content": prompt}]
     )
-    _log_tokens("generate_aar", response.usage)
+    _log_tokens("generate_aar", response.usage, user_id=user_id, session_id=session_id)
     return extract_json(_response_text(response))
 
 
@@ -1087,7 +1143,12 @@ OOB_EXTRACTION_SCHEMA = """{
 }"""
 
 
-async def extract_oob_from_text(page_text: str, faction_hints: dict) -> dict:
+async def extract_oob_from_text(
+    page_text: str,
+    faction_hints: dict,
+    user_id: str | None = None,
+    session_id: str | None = None,
+) -> dict:
     """Extract an order of battle from raw text (stripped HTML from Wikipedia etc.).
 
     faction_hints maps side names to nation/force labels, e.g.
@@ -1114,5 +1175,5 @@ Extract every named unit, formation, or force element mentioned. Return ONLY JSO
         system=[{"type": "text", "text": OOB_EXTRACTION_SYSTEM, "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user", "content": prompt}]
     )
-    _log_tokens("extract_oob_from_text", response.usage)
+    _log_tokens("extract_oob_from_text", response.usage, user_id=user_id, session_id=session_id)
     return extract_json(_response_text(response))

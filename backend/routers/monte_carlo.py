@@ -62,7 +62,9 @@ async def run_monte_carlo(
             scenario=scenario,
             session_state=session_state,
             num_runs=req.num_runs,
-            verbosity=req.verbosity
+            verbosity=req.verbosity,
+            user_id=user.id if user else None,
+            session_id=req.session_id,
         )
     except Exception as e:
         raise HTTPException(500, f"Monte Carlo analysis failed: {str(e)}")
