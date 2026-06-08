@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { scenariosApi, sessionsApi } from '../api/client'
 import { LoadingSpinner } from '../components/LoadingSpinner'
 import { StatusBadge, SideChip } from '../components/StatusBadge'
-import { Search, Plus, Copy, Play, Filter, Download, Upload, BookOpen } from 'lucide-react'
+import { Search, Plus, Copy, Play, Filter, Download, BookOpen } from 'lucide-react'
 
 function ScenarioCard({ scenario, onLaunch, onClone, onEdit }) {
   const factions = scenario.factions || []
@@ -128,23 +128,6 @@ export default function ScenarioLibrary() {
     }
   }
 
-  const handleImport = (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = async ev => {
-      try {
-        const data = JSON.parse(ev.target.result)
-        const res = await scenariosApi.create(data)
-        navigate(`/scenarios/${res.data.id}/edit`)
-      } catch (err) {
-        alert('Import failed: ' + err.message)
-      }
-    }
-    reader.readAsText(file)
-    e.target.value = ''
-  }
-
   if (loading) return <LoadingSpinner label="Loading scenario library..." />
 
   return (
@@ -159,10 +142,6 @@ export default function ScenarioLibrary() {
           <p className="text-theater-muted text-sm mt-1">{scenarios.length} scenarios available</p>
         </div>
         <div className="flex gap-2">
-          <label className="flex items-center gap-2 border border-theater-border hover:border-theater-accent/40 text-theater-gray hover:text-theater-text rounded px-3 py-2 text-xs font-mono cursor-pointer transition-all">
-            <Upload className="w-3.5 h-3.5" /> Import JSON
-            <input type="file" accept=".json" onChange={handleImport} className="hidden" />
-          </label>
           <button
             onClick={() => navigate('/scenarios/new')}
             className="flex items-center gap-2 bg-theater-accent hover:bg-theater-accent-light text-white px-4 py-2 rounded font-mono text-sm font-semibold tracking-wider transition-colors"
