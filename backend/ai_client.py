@@ -304,7 +304,7 @@ async def generate_scenario(
     client = get_client()
     response = await client.messages.create(
         model=settings.claude_model,
-        max_tokens=32000,
+        max_tokens=64000,
         system=[
             {"type": "text", "text": SCENARIO_SYSTEM, "cache_control": {"type": "ephemeral"}},
             {"type": "text", "text": f"\nOUTPUT SCHEMA (return exactly this structure):\n{SCENARIO_SCHEMA}", "cache_control": {"type": "ephemeral"}}

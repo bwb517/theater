@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
@@ -55,6 +56,11 @@ def serialize_scenario(s: models.Scenario) -> dict:
         "template_name": s.template_name,
         "created_by": s.created_by,
         "created_at": s.created_at.isoformat() if s.created_at else None,
+        "is_published": bool(s.is_published),
+        "published_by_user_id": s.published_by_user_id,
+        "published_at": s.published_at.isoformat() if s.published_at else None,
+        "usage_count": s.usage_count or 0,
+        "is_official": bool(s.is_official),
     }
 
 @router.post("/generate")
@@ -85,6 +91,105 @@ def list_scenarios(
         q = q.filter(models.Scenario.scenario_type == scenario_type)
     scenarios = q.order_by(models.Scenario.created_at.desc()).all()
     return [serialize_scenario(s) for s in scenarios]
+
+@router.get("/library")
+def get_scenario_library(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    sort: str = Query("usage_count", regex="^(usage_count|created_at|title)$"),
+    q: Optional[str] = None,
+    faction: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Paginated public scenario library — no auth required."""
+    query = db.query(models.Scenario).filter(models.Scenario.is_published == True)
+    if q:
+        query = query.filter(models.Scenario.title.ilike(f"%{q}%"))
+    if faction:
+        # Crude substring match on the stored JSON — works for SQLite and Postgres
+        query = query.filter(models.Scenario.factions.ilike(f"%{faction}%"))
+
+    sort_col = {
+        "usage_count": models.Scenario.usage_count.desc(),
+        "created_at": models.Scenario.created_at.desc(),
+        "title": models.Scenario.title.asc(),
+    }[sort]
+
+    total = query.count()
+    items = query.order_by(sort_col).offset((page - 1) * limit).limit(limit).all()
+
+    # Attach publisher username where possible
+    def _with_publisher(s):
+        data = serialize_scenario(s)
+        if s.published_by_user_id:
+            u = db.query(models.User).filter(models.User.id == s.published_by_user_id).first()
+            data["published_by_username"] = u.username if u else None
+        else:
+            data["published_by_username"] = None
+        return data
+
+    return {"total": total, "page": page, "limit": limit, "items": [_with_publisher(s) for s in items]}
+
+
+@router.post("/{scenario_id}/publish")
+def publish_scenario(
+    scenario_id: str,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    if user.role not in ("admin", "game_master"):
+        raise HTTPException(403, "Only gamemasters and admins can publish scenarios")
+    s = db.query(models.Scenario).filter(models.Scenario.id == scenario_id).first()
+    if not s:
+        raise HTTPException(404, "Scenario not found")
+    s.is_published = True
+    s.published_by_user_id = user.id
+    s.published_at = datetime.utcnow()
+    db.commit()
+    db.refresh(s)
+    return {"published": True, "published_at": s.published_at.isoformat(), "scenario_id": s.id}
+
+
+@router.post("/{scenario_id}/clone")
+def clone_scenario(
+    scenario_id: str,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    src = db.query(models.Scenario).filter(models.Scenario.id == scenario_id).first()
+    if not src:
+        raise HTTPException(404, "Scenario not found")
+
+    clone = models.Scenario(
+        title=f"{src.title} (Clone)",
+        classification=src.classification,
+        scenario_type=src.scenario_type,
+        timeframe=src.timeframe,
+        geography=src.geography,
+        situation=src.situation,
+        factions=src.factions,
+        injects=src.injects,
+        win_conditions=src.win_conditions,
+        ai_notes=src.ai_notes,
+        is_template=False,
+        template_name=None,
+        created_by=user.id,
+        # Published metadata intentionally reset
+        is_published=False,
+        published_by_user_id=None,
+        published_at=None,
+        usage_count=0,
+        is_official=False,
+    )
+    db.add(clone)
+
+    # Increment usage counter on the source
+    src.usage_count = (src.usage_count or 0) + 1
+
+    db.commit()
+    db.refresh(clone)
+    return serialize_scenario(clone)
+
 
 @router.get("/{scenario_id}")
 def get_scenario(scenario_id: str, db: Session = Depends(get_db), user=Depends(get_current_user)):

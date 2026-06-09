@@ -41,6 +41,11 @@ export const scenariosApi = {
   delete: (id) => api.delete(`/scenarios/${id}`),
   unitLibrary: (params) => api.get('/scenarios/units/library', { params }),
   addUnitToLibrary: (data) => api.post('/scenarios/units/library', data),
+  // Public library
+  library: (params) => api.get('/scenarios/library', { params }),
+  publish: (id) => api.post(`/scenarios/${id}/publish`),
+  clone: (id) => api.post(`/scenarios/${id}/clone`),
+  exportTemplate: (id) => api.get(`/scenarios/${id}/export/template`, { responseType: 'blob' }),
 }
 
 // Sessions
@@ -56,6 +61,8 @@ export const sessionsApi = {
   updateGameState: (id, state) => api.put(`/sessions/${id}/game-state`, state),
   capitulate: (id, factionId) => api.post(`/sessions/${id}/capitulate`, { faction_id: factionId }),
   delete: (id) => api.delete(`/sessions/${id}`),
+  exportJson: (id) => api.get(`/sessions/${id}/export/json`, { responseType: 'blob' }),
+  exportMarkdown: (id) => api.get(`/sessions/${id}/export/markdown`, { responseType: 'blob' }),
 }
 
 // Red Team

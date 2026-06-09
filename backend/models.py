@@ -35,6 +35,12 @@ class Scenario(Base):
     created_by = Column(String, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # Public library columns (added via migration)
+    is_published = Column(Boolean, default=False)
+    published_by_user_id = Column(String, ForeignKey("users.id"), nullable=True)
+    published_at = Column(DateTime, nullable=True)
+    usage_count = Column(Integer, default=0)
+    is_official = Column(Boolean, default=False)
 
 class UnitTemplate(Base):
     __tablename__ = "unit_templates"

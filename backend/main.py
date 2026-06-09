@@ -32,6 +32,13 @@ _MIGRATIONS = {
         "total_cost_usd": "REAL" if _is_sqlite else "DOUBLE PRECISION",
         "claude_model": "TEXT",
     },
+    "scenarios": {
+        "is_published": "BOOLEAN DEFAULT FALSE",
+        "published_by_user_id": "TEXT",
+        "published_at": "TEXT",
+        "usage_count": "INTEGER DEFAULT 0",
+        "is_official": "BOOLEAN DEFAULT FALSE",
+    },
 }
 
 def _run_migrations():
@@ -92,7 +99,7 @@ app.add_middleware(
 )
 
 # Register routers
-from routers import auth, scenarios, sessions, red_team, monte_carlo, aar, admin
+from routers import auth, scenarios, sessions, red_team, monte_carlo, aar, admin, export
 
 app.include_router(auth.router)
 app.include_router(scenarios.router)
@@ -101,6 +108,7 @@ app.include_router(red_team.router)
 app.include_router(monte_carlo.router)
 app.include_router(aar.router)
 app.include_router(admin.router)
+app.include_router(export.router)
 
 @app.get("/health")
 def health(db: Session = Depends(get_db)):
