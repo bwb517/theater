@@ -476,6 +476,37 @@ def capitulate(
     db.refresh(session)
     return serialize_session(session)
 
+@router.get("/{session_id}/turns/{turn_number}/audit")
+def get_turn_audit(
+    session_id: str,
+    turn_number: int,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Return the verbatim AI audit trail for a specific turn."""
+    turn_log = db.query(models.TurnLog).filter(
+        models.TurnLog.session_id == session_id,
+        models.TurnLog.turn_number == turn_number,
+    ).first()
+    if not turn_log:
+        raise HTTPException(404, "Turn not found")
+    audit = db.query(models.AdjudicationLog).filter(
+        models.AdjudicationLog.turn_id == turn_log.id,
+    ).first()
+    if not audit:
+        raise HTTPException(404, "No audit log for this turn")
+    return {
+        "turn_number": turn_number,
+        "function_name": audit.function_name,
+        "timestamp": audit.timestamp.isoformat() if audit.timestamp else None,
+        "inputs": json.loads(audit.ai_inputs or "{}"),
+        "system_prompt": audit.ai_system_prompt,
+        "user_message": audit.ai_user_message,
+        "reasoning": audit.ai_reasoning,
+        "full_response": json.loads(audit.ai_response_full or "[]"),
+        "outcome": json.loads(audit.turn_outcome or "{}"),
+    }
+
 @router.delete("/{session_id}", status_code=204)
 def delete_session(
     session_id: str,

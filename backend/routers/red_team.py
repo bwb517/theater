@@ -30,18 +30,23 @@ class AIPersonalityUpdate(BaseModel):
     personality: str
 
 def _require_session_access(user: models.User, session: models.GameSession):
-    """Admin and gamemaster always allowed; player allowed if they are a session participant."""
-    if user.role in ("admin", "gamemaster"):
+    """Admin and game_master always allowed; player allowed if they created the session,
+    if the session has no explicit user_id assignments (open/demo mode), or if their
+    user_id appears in faction_assignments."""
+    if user.role in ("admin", "game_master"):
+        return
+    # Session creator is always allowed
+    if session.created_by and str(session.created_by) == str(user.id):
         return
     # faction_assignments is a JSON list of {"faction_id": ..., "user_id": ..., "type": ...}
     assignments = json.loads(session.faction_assignments or "[]")
+    named = [a for a in assignments if isinstance(a, dict) and a.get("user_id")]
+    # If no assignment carries a user_id the session is open to any authenticated user
+    # (covers demo sessions and solo-play sessions created without explicit player assignment)
+    if not named:
+        return
     user_id_str = str(user.id)
-    allowed = any(
-        str(a.get("user_id", "")) == user_id_str
-        for a in assignments
-        if isinstance(a, dict) and a.get("user_id")
-    )
-    if not allowed:
+    if not any(str(a["user_id"]) == user_id_str for a in named):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
 @router.post("/{session_id}/red-team")
@@ -209,7 +214,7 @@ async def adjudicate_turn(
     red_moves = req.red_moves or (json.loads(turn_log.ai_moves or "[]") if turn_log else [])
 
     try:
-        result = await ai_client.adjudicate_turn(
+        result, audit_payload = await ai_client.adjudicate_turn(
             scenario=scenario,
             blue_moves=blue_moves,
             red_moves=red_moves,
@@ -236,9 +241,19 @@ async def adjudicate_turn(
     if violations:
         result["rule_violations"] = violations
 
-    # Store the adjudication (now including any rule violations) on the turn log
-    if turn_log:
-        turn_log.adjudication = json.dumps(result)
+    # Ensure a TurnLog row exists — creates one if moves were submitted without going through
+    # the normal red-team flow (e.g., direct adjudication via GM inject).
+    if not turn_log:
+        turn_log = models.TurnLog(
+            session_id=session_id,
+            turn_number=turn_number,
+            player_moves=json.dumps(blue_moves),
+            ai_moves=json.dumps(red_moves),
+        )
+        db.add(turn_log)
+        db.flush()  # populate turn_log.id so AdjudicationLog.turn_id is set correctly
+
+    turn_log.adjudication = json.dumps(result)
 
     unit_map = {u["unit_id"]: u for u in game_state.get("unit_status", [])}
 
@@ -263,6 +278,18 @@ async def adjudicate_turn(
 
     session.previous_game_state = session.current_game_state
     session.current_game_state = json.dumps(game_state)
+
+    # Write audit log in the same commit as turn_log.adjudication for atomicity.
+    # turn_log is guaranteed non-None here (created above if missing).
+    audit_log = models.AdjudicationLog(
+        turn_id=turn_log.id,
+        session_id=session_id,
+        user_id=user.id if user else None,
+        turn_outcome=json.dumps(result),
+        **audit_payload,
+    )
+    db.add(audit_log)
+
     db.commit()
 
     return {"success": True, "adjudication": result}

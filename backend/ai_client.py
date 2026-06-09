@@ -177,6 +177,30 @@ def _slim_game_state(game_state: dict) -> dict:
         "faction_scores": game_state.get("faction_scores", []),
     }
 
+def _extract_reasoning(result: dict, function_name: str) -> str:
+    """Pull the human-readable rationale out of a Claude adjudication/red-team result."""
+    if function_name == "adjudicate_turn":
+        parts = []
+        if result.get("narrative"):
+            parts.append(result["narrative"])
+        if result.get("decisive_moment"):
+            parts.append(f"Decisive Moment: {result['decisive_moment']}")
+        return "\n\n".join(parts)
+    if function_name == "generate_red_team_moves":
+        parts = []
+        if result.get("intelligence_assessment"):
+            parts.append(f"Intel Assessment: {result['intelligence_assessment']}")
+        coa = result.get("selected_coa", {})
+        if coa.get("rationale"):
+            parts.append(f"COA Rationale: {coa['rationale']}")
+        if result.get("risk_assessment"):
+            parts.append(f"Risk: {result['risk_assessment']}")
+        return "\n\n".join(parts)
+    for key in ("reasoning", "rationale", "narrative", "analysis"):
+        if key in result:
+            return str(result[key])
+    return ""
+
 # ─────────────────────────────────────────────────────────────────────────────
 # MODULE 1: SCENARIO GENERATOR
 # ─────────────────────────────────────────────────────────────────────────────
@@ -558,7 +582,7 @@ async def adjudicate_turn(
     verbosity: int = 2,
     user_id: str | None = None,
     session_id: str | None = None,
-) -> dict:
+) -> tuple[dict, dict]:
     client = get_client()
     planning_assumptions = scenario.get("situation", {}).get("planning_assumptions", {})
     pa_section = f"\nPLANNING ASSUMPTIONS (apply these constraints when adjudicating):\n{json.dumps(planning_assumptions, indent=2)}\n" if planning_assumptions else ""
@@ -579,6 +603,15 @@ CURRENT GAME STATE (includes supply, will_to_fight, c2_status per unit):
 
 Adjudicate this turn. Set "turn_number" to {turn_number}. Return JSON matching the OUTPUT SCHEMA in your system instructions. All arrays are required — use empty arrays if nothing applies. Return ONLY JSON.{_verbosity_instruction(verbosity)}"""
 
+    audit_inputs = {
+        "scenario_title": scenario.get("title"),
+        "turn_number": turn_number,
+        "blue_moves": blue_moves,
+        "red_moves": red_moves,
+        "unit_status": slim_gs.get("unit_status", []),
+        "faction_scores": slim_gs.get("faction_scores", []),
+    }
+
     response = await client.messages.create(
         model=settings.claude_model,
         max_tokens=8000,
@@ -589,7 +622,21 @@ Adjudicate this turn. Set "turn_number" to {turn_number}. Return JSON matching t
         messages=[{"role": "user", "content": prompt}]
     )
     _log_tokens("adjudicate_turn", response.usage, user_id=user_id, session_id=session_id)
-    return extract_json(_response_text(response))
+    result = extract_json(_response_text(response))
+
+    audit_payload = {
+        "function_name": "adjudicate_turn",
+        "ai_inputs": json.dumps(audit_inputs),
+        "ai_system_prompt": ADJUDICATION_SYSTEM + "\n\n---OUTPUT SCHEMA---\n" + ADJUDICATION_OUTPUT_SCHEMA,
+        "ai_user_message": prompt,
+        "ai_response_full": json.dumps([
+            {"type": b.type, "text": getattr(b, "text", None)}
+            for b in response.content
+        ]),
+        "ai_reasoning": _extract_reasoning(result, "adjudicate_turn"),
+    }
+
+    return result, audit_payload
 
 
 # ─────────────────────────────────────────────────────────────────────────────

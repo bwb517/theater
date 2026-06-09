@@ -33,7 +33,98 @@ const TABS = [
   { id: 'scores', label: 'Scores', icon: Trophy },
 ]
 
-function TurnEntry({ turn, onViewDiff }) {
+function AuditBlock({ title, content, isText = false, softLimit = null }) {
+  const [showFull, setShowFull] = useState(false)
+  const text = isText ? (content ?? '') : JSON.stringify(content, null, 2)
+  const truncated = softLimit && !showFull && text.length > softLimit
+  return (
+    <div>
+      <p className="text-theater-muted font-mono text-xs mb-1 tracking-wider">{title}</p>
+      <pre className="text-theater-gray text-xs leading-relaxed bg-theater-bg border border-theater-border rounded p-3 overflow-auto whitespace-pre-wrap break-all" style={{ maxHeight: 280 }}>
+        {truncated ? text.slice(0, softLimit) + '\n\n[…truncated]' : text}
+      </pre>
+      {softLimit && text.length > softLimit && (
+        <button
+          onClick={() => setShowFull(f => !f)}
+          className="text-theater-muted text-xs font-mono hover:text-theater-text transition-colors mt-1"
+        >
+          {showFull ? '▲ Show less' : `▼ Show all ${text.length.toLocaleString()} chars`}
+        </button>
+      )}
+    </div>
+  )
+}
+
+function AdjudicationAuditPanel({ sessionId, turnNumber }) {
+  const [audit, setAudit] = useState(null)
+  const [open, setOpen] = useState(false)
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+
+  const toggle = async () => {
+    if (!audit && !loading) {
+      setLoading(true)
+      try {
+        const { data } = await sessionsApi.getTurnAudit(sessionId, turnNumber)
+        setAudit(data)
+        setOpen(true)
+      } catch {
+        setError('Audit log not available for this turn.')
+        setOpen(true)
+      } finally {
+        setLoading(false)
+      }
+    } else {
+      setOpen(o => !o)
+    }
+  }
+
+  return (
+    <div className="mt-3 pt-3 border-t border-theater-border/40">
+      <button
+        onClick={toggle}
+        className="text-theater-muted text-xs font-mono hover:text-theater-text transition-colors flex items-center gap-2"
+      >
+        <span>⊞</span>
+        {loading ? 'LOADING AUDIT...' : `AI AUDIT TRAIL ${open ? '▲' : '▼'}`}
+      </button>
+      {open && (
+        <div className="mt-3 space-y-3">
+          {error && <p className="text-theater-red text-xs font-mono">{error}</p>}
+          {audit && (
+            <>
+              <p className="text-theater-muted font-mono text-xs">
+                {audit.function_name} · {audit.timestamp ? new Date(audit.timestamp).toUTCString() : ''}
+              </p>
+              <div className="bg-theater-bg border border-theater-border rounded p-3">
+                <p className="text-theater-muted font-mono text-xs mb-2 tracking-wider">CAPTURED REASONING</p>
+                <p className="text-theater-gray text-xs leading-relaxed whitespace-pre-wrap">{audit.reasoning}</p>
+              </div>
+              <button
+                onClick={() => setDetailOpen(d => !d)}
+                className="text-theater-muted text-xs font-mono hover:text-theater-text transition-colors"
+              >
+                {detailOpen ? '▲ HIDE VERBATIM AUDIT' : '▼ SHOW VERBATIM AUDIT'}
+              </button>
+              {detailOpen && (
+                <div className="space-y-4">
+                  <AuditBlock title="AI INPUTS (what Claude saw)" content={audit.inputs} />
+                  <AuditBlock title="SYSTEM PROMPT" content={audit.system_prompt} isText />
+                  <AuditBlock title="USER MESSAGE" content={audit.user_message} isText />
+                  <AuditBlock title="FULL CLAUDE RESPONSE" content={audit.full_response} softLimit={5000} />
+                  <AuditBlock title="TURN OUTCOME (post rules-engine)" content={audit.outcome} />
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TurnEntry({ turn, onViewDiff, sessionId }) {
   const [open, setOpen] = useState(false)
   const adj = turn.adjudication || {}
   return (
@@ -125,6 +216,10 @@ function TurnEntry({ turn, onViewDiff }) {
                 )}
               </div>
             </div>
+          )}
+
+          {adj.narrative && sessionId && (
+            <AdjudicationAuditPanel sessionId={sessionId} turnNumber={turn.turn_number} />
           )}
 
           {turn.game_master_notes && (
@@ -783,6 +878,7 @@ export default function GameSession() {
                 <TurnEntry
                   key={t.turn_number}
                   turn={t}
+                  sessionId={id}
                   onViewDiff={(adj, turnNum) => { setDiffData({ ...adj, turn_number: turnNum }); setShowDiff(true) }}
                 />
               ))

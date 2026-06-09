@@ -63,6 +63,7 @@ export const sessionsApi = {
   delete: (id) => api.delete(`/sessions/${id}`),
   exportJson: (id) => api.get(`/sessions/${id}/export/json`, { responseType: 'blob' }),
   exportMarkdown: (id) => api.get(`/sessions/${id}/export/markdown`, { responseType: 'blob' }),
+  getTurnAudit: (id, turnNumber) => api.get(`/sessions/${id}/turns/${turnNumber}/audit`),
 }
 
 // Red Team

@@ -88,6 +88,7 @@ class TurnLog(Base):
     game_master_notes = Column(Text)
 
     session = relationship("GameSession", back_populates="turn_logs")
+    adjudication_log = relationship("AdjudicationLog", back_populates="turn_log", uselist=False)
 
 class MonteCarloResult(Base):
     __tablename__ = "monte_carlo_results"
@@ -106,6 +107,23 @@ class AARReport(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     session = relationship("GameSession", back_populates="aar_reports")
+
+class AdjudicationLog(Base):
+    __tablename__ = "adjudication_logs"
+    id               = Column(String, primary_key=True, default=gen_id)
+    turn_id          = Column(String, ForeignKey("turn_logs.id"), nullable=True)
+    session_id       = Column(String, ForeignKey("game_sessions.id"), nullable=False)
+    user_id          = Column(String, ForeignKey("users.id"), nullable=True)
+    function_name    = Column(String, nullable=False)
+    timestamp        = Column(DateTime, default=datetime.utcnow)
+    ai_inputs        = Column(Text)       # JSON: blue_moves, red_moves, unit_status, turn_number
+    ai_system_prompt = Column(Text)       # full system prompt sent to Claude
+    ai_user_message  = Column(Text)       # full user message sent to Claude
+    ai_response_full = Column(Text)       # JSON: [{type, text}] for each response block
+    ai_reasoning     = Column(Text)       # extracted narrative/rationale
+    turn_outcome     = Column(Text)       # JSON: adjudication result after rules_engine
+
+    turn_log = relationship("TurnLog", back_populates="adjudication_log")
 
 class TokenUsage(Base):
     __tablename__ = "token_usage"
