@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { sessionsApi, redTeamApi } from '../api/client'
+import { sessionsApi, redTeamApi, forecastingApi } from '../api/client'
 import { LoadingSpinner } from '../components/LoadingSpinner'
 import { StatusBadge, SideChip, StrengthBar } from '../components/StatusBadge'
 import OperationalMap from '../components/OperationalMap'
 import OrdersForm, { blankOrder } from '../components/OrdersForm'
 import TurnDiffPanel from '../components/TurnDiffPanel'
+import PreTurnForecastPanel from '../components/PreTurnForecastPanel'
+import ForecastingDashboard from '../components/ForecastingDashboard'
 import { Map, Send, ScrollText, Eye, Trophy, ChevronDown, AlertCircle, Zap, SkipForward, X, Trash2, RotateCcw, Flag, Navigation, Target } from 'lucide-react'
 
 // Derive current turn workflow phase from session state
@@ -124,7 +126,42 @@ function AdjudicationAuditPanel({ sessionId, turnNumber }) {
   )
 }
 
-function TurnEntry({ turn, onViewDiff, sessionId }) {
+// Inline "your forecast vs what happened" for a resolved turn forecast.
+function ForecastVsOutcome({ forecast }) {
+  if (!forecast || forecast.brier_score == null) return null
+  const rows = [
+    ['Blue achieves objectives', forecast.p_blue_wins, forecast.blue_achieved],
+    ['Red achieves objectives', forecast.p_red_wins, forecast.red_achieved],
+    ['Escalation occurs', forecast.p_escalation, forecast.escalation_occurred],
+    ['Key objective changes', forecast.p_key_objective_captured, forecast.key_objective_captured],
+  ]
+  return (
+    <div>
+      <p className="text-theater-accent-light font-mono text-xs tracking-wider mb-2 flex items-center gap-2">
+        <span className="w-2 h-2 rounded-sm bg-theater-accent" /> Forecast vs Outcome
+        <span className="text-theater-muted">· Brier {forecast.brier_score.toFixed(3)} (0=perfect, 2=worst)</span>
+      </p>
+      <div className="bg-theater-card border border-theater-border rounded p-3 space-y-1">
+        {rows.map(([label, p, actual], i) => (
+          <div key={i} className="flex items-center justify-between text-xs">
+            <span className="text-theater-gray">{label}</span>
+            <span className="font-mono flex items-center gap-2">
+              <span className="text-theater-muted">est {typeof p === 'number' ? Math.round(p * 100) : '—'}%</span>
+              <span className={actual ? 'text-theater-green' : 'text-theater-red'}>
+                {actual ? '✓ occurred' : '✗ did not'}
+              </span>
+            </span>
+          </div>
+        ))}
+        {forecast.rationale && (
+          <p className="text-theater-muted text-xs italic pt-2 border-t border-theater-border/40 mt-2">"{forecast.rationale}"</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function TurnEntry({ turn, onViewDiff, sessionId, forecast }) {
   const [open, setOpen] = useState(false)
   const adj = turn.adjudication || {}
   return (
@@ -222,6 +259,8 @@ function TurnEntry({ turn, onViewDiff, sessionId }) {
             <AdjudicationAuditPanel sessionId={sessionId} turnNumber={turn.turn_number} />
           )}
 
+          <ForecastVsOutcome forecast={forecast} />
+
           {turn.game_master_notes && (
             <div>
               <p className="text-yellow-600 font-mono text-xs tracking-wider mb-1">GM Notes</p>
@@ -281,6 +320,14 @@ export default function GameSession() {
   // Units highlighted on map after adjudication
   const [highlightedUnits, setHighlightedUnits] = useState([])
 
+  // Forecasting overlay (optional, opt-in per session)
+  const [forecastSummary, setForecastSummary] = useState(null)
+  const fetchForecastSummary = useCallback(() => {
+    forecastingApi.summary(id)
+      .then(r => setForecastSummary(r.data))
+      .catch(() => {})
+  }, [id])
+
   // Wrapped orders setter that tracks history for undo (only when order count changes)
   const setOrdersTracked = useCallback((updater) => {
     const prev = pendingOrdersRef.current
@@ -302,6 +349,7 @@ export default function GameSession() {
   const refresh = () => sessionsApi.get(id).then(r => {
     setSession(r.data)
     setTurnPhase(derivePhase(r.data))
+    if (r.data.forecasting_enabled) fetchForecastSummary()
     return r.data
   })
 
@@ -827,6 +875,14 @@ export default function GameSession() {
 
         {activeTab === 'moves' && (
           <div className="h-full overflow-y-auto">
+            {session.forecasting_enabled && turnPhase === 'player' && (
+              <PreTurnForecastPanel
+                session={session}
+                turnNum={session.current_turn}
+                alreadyForecast={(forecastSummary?.turn_by_turn || []).some(t => t.turn_num === session.current_turn)}
+                onSubmitted={fetchForecastSummary}
+              />
+            )}
             {pendingOrdersHistory.length > 0 && (
               <div className="flex items-center justify-end px-4 pt-3">
                 <button
@@ -885,6 +941,7 @@ export default function GameSession() {
                   key={t.turn_number}
                   turn={t}
                   sessionId={id}
+                  forecast={(forecastSummary?.turn_by_turn || []).find(f => f.turn_num === t.turn_number)}
                   onViewDiff={(adj, turnNum) => { setDiffData({ ...adj, turn_number: turnNum }); setShowDiff(true) }}
                 />
               ))
@@ -1008,6 +1065,8 @@ export default function GameSession() {
         {activeTab === 'scores' && (
           <div className="h-full overflow-y-auto p-4 space-y-4">
             <h3 className="text-theater-text font-mono font-semibold">Scores & Objectives — Turn {session.current_turn}</h3>
+
+            {session.forecasting_enabled && <ForecastingDashboard summary={forecastSummary} />}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {scores.map(fs => (

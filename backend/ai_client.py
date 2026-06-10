@@ -1112,6 +1112,48 @@ Return ONLY JSON. Write analytically — this is a professional deliverable.{_ve
     return extract_json(_response_text(response))
 
 
+FORECASTING_NARRATIVE_SYSTEM = (
+    "You are an analytic wargaming coach. You write a short, plain-language interpretation "
+    "of a player's probabilistic-forecasting performance, scored with the Brier score "
+    "(Brier, 1950; 0 = perfect, 2 = worst, ~0.5 = a coin flip). Be concrete and constructive: "
+    "tell the player whether they were well-calibrated, overconfident, or underconfident, what "
+    "that means, and how to improve. Two to four sentences. Reference Brier (1950) once."
+)
+
+
+async def forecasting_narrative(
+    summary: dict,
+    user_id: str | None = None,
+    session_id: str | None = None,
+) -> str:
+    """Short plain-language calibration narrative for AAR Section 8.
+
+    Hybrid design: the numbers (Brier average, calibration rating, per-turn table) are
+    computed deterministically by `forecasting.build_forecasting_summary`; this call only
+    writes the prose paragraph. Callers must wrap it so a failure falls back to a
+    templated sentence — the numeric section never depends on this call.
+    """
+    client = get_client()
+    prompt = f"""A player made per-turn probability forecasts during a wargame and was scored with the Brier score.
+
+FORECASTING SUMMARY (already computed — do not recompute the numbers):
+{json.dumps(summary, indent=2)}
+
+Write the interpretation paragraph. Return JSON exactly: {{"narrative": "string"}}"""
+
+    response = await client.messages.create(
+        model=settings.claude_model,
+        max_tokens=1024,
+        system=[{"type": "text", "text": FORECASTING_NARRATIVE_SYSTEM, "cache_control": {"type": "ephemeral"}}],
+        messages=[{"role": "user", "content": prompt}],
+    )
+    _log_tokens("forecasting_narrative", response.usage, user_id=user_id, session_id=session_id)
+    data = extract_json(_response_text(response))
+    if isinstance(data, dict):
+        return data.get("narrative", "")
+    return ""
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # MODULE 5: OOB EXTRACTION FROM TEXT (Wikipedia / paste)
 # ─────────────────────────────────────────────────────────────────────────────

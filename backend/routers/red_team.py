@@ -9,6 +9,8 @@ from game_consts import haversine_km
 import models
 import ai_client
 import rules_engine
+import briefing
+import forecasting
 from datetime import datetime
 
 router = APIRouter(prefix="/api/sessions", tags=["red-team"])
@@ -276,8 +278,54 @@ async def adjudicate_turn(
         existing_logistics.append({"turn": turn_number, **impact})
     game_state["logistics_impacts"] = existing_logistics[-20:]  # keep last 20
 
+    # Capture the pre-adjudication state for forecast scoring BEFORE it is overwritten:
+    # session.current_game_state still holds this turn's starting scores at this point.
+    prev_state_for_forecast = json.loads(session.current_game_state or "{}")
     session.previous_game_state = session.current_game_state
     session.current_game_state = json.dumps(game_state)
+
+    # Optional forecasting overlay: resolve any pre-turn forecast against the outcome.
+    # Wrapped so a forecasting failure can NEVER break adjudication — graceful overlay.
+    if session.forecasting_enabled:
+        try:
+            fc = db.query(models.TurnForecast).filter(
+                models.TurnForecast.session_id == session_id,
+                models.TurnForecast.turn_number == turn_number,
+                models.TurnForecast.resolved_at.is_(None),
+            ).first()
+            if fc:
+                # scenario (the slim dict above) carries no factions; use the parsed list.
+                side_map = briefing.build_side_map({"factions": scenario_factions})
+                outcomes = forecasting.resolve_outcomes(
+                    result, prev_state_for_forecast, game_state, side_map
+                )
+                fc.blue_achieved = outcomes["blue_achieved"]
+                fc.red_achieved = outcomes["red_achieved"]
+                fc.escalation_occurred = outcomes["escalation_occurred"]
+                fc.key_objective_captured = outcomes["key_objective_captured"]
+                fc.brier_score = forecasting.brier_score(
+                    {
+                        "p_blue_wins": fc.p_blue_wins,
+                        "p_red_wins": fc.p_red_wins,
+                        "p_escalation": fc.p_escalation,
+                        "p_key_objective_captured": fc.p_key_objective_captured,
+                    },
+                    outcomes,
+                )
+                fc.resolved_at = datetime.utcnow()
+                if fc.turn_id is None:
+                    fc.turn_id = turn_log.id
+                # Rolling average of all resolved Brier scores in this session.
+                resolved = db.query(models.TurnForecast).filter(
+                    models.TurnForecast.session_id == session_id,
+                    models.TurnForecast.brier_score.isnot(None),
+                    models.TurnForecast.id != fc.id,
+                ).all()
+                scores = [r.brier_score for r in resolved] + [fc.brier_score]
+                session.total_brier_score = sum(scores) / len(scores)
+        except Exception:
+            # Never let forecast resolution interfere with the core turn flow.
+            pass
 
     # Write audit log in the same commit as turn_log.adjudication for atomicity.
     # turn_log is guaranteed non-None here (created above if missing).

@@ -14,7 +14,7 @@ Full-stack AI military wargaming platform. FastAPI backend + React/Vite frontend
 |------|---------|
 | `backend/main.py` | App root — CORS middleware, `_run_migrations()` for SQLite ALTER TABLE, registers all 7 routers, `/health` endpoint |
 | `backend/database.py` | SQLAlchemy engine/session (WAL mode for SQLite), Pydantic `Settings`, LRU-cached `get_settings()`, reads `.env` |
-| `backend/models.py` | ORM models: `User`, `Scenario`, `GameSession`, `TurnLog`, `MonteCarloResult`, `AARReport`, `UnitTemplate`, `TokenUsage` — all UUID PKs |
+| `backend/models.py` | ORM models: `User`, `Scenario`, `GameSession`, `TurnLog`, `TurnForecast`, `MonteCarloResult`, `AARReport`, `UnitTemplate`, `TokenUsage`, `AdjudicationLog` — all UUID PKs. `GameSession.forecasting_enabled`/`total_brier_score` drive the optional forecasting overlay |
 | `backend/auth.py` | JWT + bcrypt: `hash_password`, `create_access_token`, `get_current_user` dependency, `get_optional_user` (public routes), `require_role` decorator |
 | `backend/limiter.py` | slowapi `Limiter` instance — import and apply `@limiter.limit("N/period")` on expensive endpoints |
 | `backend/ai_client.py` | **All Claude calls** — see AI Client section below |
@@ -24,12 +24,13 @@ Full-stack AI military wargaming platform. FastAPI backend + React/Vite frontend
 | `backend/seed_data.py` | Demo users (admin/gamemaster/player1, pw: `theater123`), 50+ unit templates, 5 scenario templates, demo session with 4 turns |
 | `backend/routers/auth.py` | `POST /register`, `POST /login`, `GET /me` |
 | `backend/routers/scenarios.py` | Scenario CRUD, `POST /generate` (NL → AI), unit library, OOB import from text/file/Wikipedia |
-| `backend/routers/sessions.py` | Session CRUD, submit moves, advance-turn, GM notes, game-state update |
-| `backend/routers/red_team.py` | `POST /red-team` (AI moves), `POST /adjudicate`, `PUT /personality` |
+| `backend/routers/sessions.py` | Session CRUD, submit moves, advance-turn, GM notes, game-state update; forecast endpoints (`POST /turns/{n}/forecast`, `GET /forecasting-summary`) |
+| `backend/routers/red_team.py` | `POST /red-team` (AI moves), `POST /adjudicate` (also resolves any pending forecast — graceful try/except, never blocks adjudication), `PUT /personality` |
 | `backend/routers/monte_carlo.py` | `POST /run` (rate-limited 5/hour), `GET` by ID / session / scenario |
-| `backend/routers/aar.py` | Generate 7-section AAR via Claude, PDF export via reportlab, public share token (no auth); also briefing export endpoints |
+| `backend/routers/aar.py` | Generate 7-section AAR via Claude (+ optional deterministic Section 8 "Forecasting Accuracy" with a small Claude narrative call — hybrid), PDF export via reportlab, public share token (no auth); also briefing export endpoints |
+| `backend/forecasting.py` | Pure logic for the optional per-turn forecasting overlay: `brier_score()` (two-class Brier, 0=perfect/2=worst = `mean(2*(p-o)^2)`), `resolve_outcomes()` (binary outcomes from adjudication result + score diff), `calibration_rating()`, `build_forecasting_summary()`. No DB/network. `BRIER_NOTE` cites Brier 1950 |
 | `backend/routers/export.py` | Session JSON/Markdown export, scenario template export — deterministic, no AI |
-| `backend/briefing.py` | Pure logic: `build_briefing()` computes structured briefing from session + AdjudicationLog (timeline, turning points, state evolution, outcome). Single source of truth for strength metric definition (`STRENGTH_METRIC_NOTE`). |
+| `backend/briefing.py` | Pure logic: `build_briefing()` computes structured briefing from session + AdjudicationLog (timeline, turning points, state evolution, outcome). Single source of truth for strength metric definition (`STRENGTH_METRIC_NOTE`). Optional `forecasts=` param adds a deterministic `forecasting_accuracy` block (overall Brier, calibration summary, notable mispredictions, methodology note, per-turn calibration) — omitted when no forecast is resolved. |
 | `backend/routers/admin.py` | Stats, user list, session audit — admin role required |
 
 ---
@@ -75,6 +76,7 @@ Full-stack AI military wargaming platform. FastAPI backend + React/Vite frontend
 - **`ai_personality_overrides`** on `GameSession` is a JSON column (faction_id → personality string) added via migration; `RedTeamConsole.jsx` reads/writes it via `PUT /api/red-team/personality`
 - **Token logging & cost tracking**: Every Claude call logs its usage to the `TokenUsage` table via `pricing.compute_cost()` which multiplies input/output/cache_write/cache_read tokens by their per-1M rates. New AI functions must call `_log_tokens(function_name, response.usage)` after every Anthropic API call to maintain audit trail and budget visibility
 - **Token efficiency**: Always use `_slim_game_state()` and `_slim_scenario_for_mc()` helpers before serializing game/scenario data to Claude prompts — they reduce token count by stripping non-essential arrays and verbose fields. Check `TokenUsage` table post-deployment to catch unexpected cost spikes
+- **Forecasting overlay** (optional, opt-in per session via `forecasting_enabled`): players assign probabilities to four binary outcomes (`p_blue_wins`, `p_red_wins`, `p_escalation`, `p_key_objective_captured`) *before* adjudication via `POST /api/sessions/{id}/turns/{n}/forecast`. Resolution happens inside `red_team.py`'s `/adjudicate` (NOT advance-turn — that's where scoring lives), wrapped in try/except so it can never break the turn flow. Scoring math lives entirely in pure `forecasting.py`. Brier is the **two-class** form (`mean(2*(p-o)^2)`, range 0–2) — matches the tests and the superforecasting convention; do not "simplify" it to `mean((p-o)^2)`. `resolve_outcomes` needs a real side map: build it from `scenario_obj.factions`, NOT the slim `scenario` dict in `/adjudicate` (which omits `factions`). Surfaces in GameSession (pre-turn panel + inline forecast-vs-outcome + `ForecastingDashboard`), AAR Section 8, and the briefing export. **Briefing export** (`/briefing-export` JSON/Markdown/PDF): `forecasting.build_forecasting_accuracy()` produces the `forecasting_accuracy` block (overall Brier, calibration summary, notable mispredictions = confidently-wrong question-instances with `brier_component>=0.5`, methodology note, `turn_calibration`). The PDF renders a grouped bar chart (`aar._calibration_chart()`, reportlab `VerticalBarChart`: mean estimate vs actual rate per turn) — wrapped in try/except so a chart failure degrades to tables, never breaks the export. Distinct from `build_forecasting_summary()` (AAR §8 + `/forecasting-summary` endpoint), which keeps the per-question turn table.
 - **Briefing export** (deterministic, no Claude): `GET /api/sessions/{id}/briefing-export` returns JSON with timeline, turning points, state evolution (mean force strength per turn), and outcome. Three formats: JSON, Markdown, PDF. `briefing.py` computes turning points by identifying turns with largest impact on outcome (via delta scoring). **Strength metric**: mean force strength is the average unit health (0-100) across a side's units, using manning % or strength-state mapping (Full=100, Degraded≈67, Critical≈33, Destroyed=0). Definition is in `briefing.STRENGTH_METRIC_NOTE` to ensure UI, Markdown, and PDF all describe it identically.
 
 ---
@@ -133,6 +135,7 @@ Common test patterns:
 - **Cost calculation**: `test_cost_calc.py` verifies pricing multipliers for cache write/read and different models
 - **Export/library**: `test_export_library.py` tests session JSON/Markdown export, scenario publishing, cloning, and library search. Auth tokens encode `sub=user.id` (matching production login flow in `routers/auth.py`), not username.
 - **Briefing**: `test_briefing.py` verifies turning-point detection (state delta scoring), timeline assembly, and Markdown/JSON/PDF consistency. Tests use synthetic game states with known pivot points.
+- **Forecasting**: `test_forecasting.py` covers Brier correctness (perfect=0, worst=2, coin-flip≈0.5, clamping, p=0/outcome=1 edge), outcome resolution, calibration thresholds, submission guards (before-adjudication-only/disabled/wrong-turn), AAR Section 8 presence/absence, briefing block, and the `/adjudicate` resolution hook (mocks `ai_client.adjudicate_turn`). Mix of pure-logic and TestClient integration tests.
 
 ---
 

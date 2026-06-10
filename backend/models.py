@@ -67,6 +67,8 @@ class GameSession(Base):
     current_game_state = Column(Text)           # JSON
     previous_game_state = Column(Text)          # JSON — snapshot before last adjudication
     ai_personality_overrides = Column(Text)     # JSON — faction_id → personality, stored per-session
+    forecasting_enabled = Column(Boolean, default=False)  # opt-in probabilistic forecasting overlay
+    total_brier_score = Column(Float, nullable=True)      # rolling avg of resolved per-turn Brier scores
     created_by = Column(String, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -89,6 +91,28 @@ class TurnLog(Base):
 
     session = relationship("GameSession", back_populates="turn_logs")
     adjudication_log = relationship("AdjudicationLog", back_populates="turn_log", uselist=False)
+
+class TurnForecast(Base):
+    __tablename__ = "turn_forecasts"
+    id           = Column(String, primary_key=True, default=gen_id)
+    turn_id      = Column(String, ForeignKey("turn_logs.id"), nullable=True)
+    session_id   = Column(String, ForeignKey("game_sessions.id"), nullable=False)
+    user_id      = Column(String, ForeignKey("users.id"), nullable=True)
+    submitted_at = Column(DateTime, default=datetime.utcnow)
+    turn_number  = Column(Integer)   # convenience lookup before turn_id is populated
+    # Pre-turn probability estimates (0.0–1.0), submitted BEFORE adjudication
+    p_blue_wins              = Column(Float)
+    p_red_wins               = Column(Float)
+    p_escalation             = Column(Float)
+    p_key_objective_captured = Column(Float)
+    rationale                = Column(Text)
+    # Post-adjudication resolution (null until the turn is adjudicated)
+    resolved_at              = Column(DateTime, nullable=True)
+    blue_achieved            = Column(Boolean, nullable=True)
+    red_achieved             = Column(Boolean, nullable=True)
+    escalation_occurred      = Column(Boolean, nullable=True)
+    key_objective_captured   = Column(Boolean, nullable=True)
+    brier_score              = Column(Float, nullable=True)  # 0 = perfect, 2 = worst
 
 class MonteCarloResult(Base):
     __tablename__ = "monte_carlo_results"

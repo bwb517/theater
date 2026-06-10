@@ -24,6 +24,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from game_consts import STRENGTH_RANK, STRENGTH_LADDER
+import forecasting
 
 # --- tunable detection weights (documented so tests can pin them) -----------
 # impact_score = abs(force_ratio_delta)            # strength balance swing, 0-100 pts
@@ -391,8 +392,14 @@ def build_briefing(
     adjudication_rows: list,
     final_state: dict,
     session_meta: dict,
+    forecasts: list = None,
 ) -> dict:
-    """Assemble the full briefing dict. See module docstring for input shapes."""
+    """Assemble the full briefing dict. See module docstring for input shapes.
+
+    `forecasts` (optional): TurnForecast rows/dicts. When present and non-empty, a
+    deterministic "forecasting" block (Brier average, calibration, per-turn estimates
+    vs outcomes) is added; absence is a no-op so non-forecasting sessions are unchanged.
+    """
     scenario = scenario or {}
     final_state = final_state or {}
     session_meta = session_meta or {}
@@ -477,6 +484,9 @@ def build_briefing(
 
     turning_points = identify_turning_points(turn_metrics)
 
+    # --- forecasting accuracy (optional overlay) ----------------------------
+    forecasting_block = forecasting.build_forecasting_accuracy(forecasts) if forecasts else None
+
     # --- outcome ------------------------------------------------------------
     blue_total, red_total = _final_side_scores(final_state, side_map)
     outcome = _determine_outcome(blue_total, red_total)
@@ -515,6 +525,7 @@ def build_briefing(
         "outcome_narrative": _outcome_narrative(
             outcome, blue_total, red_total, final_snap, objectives,
         ),
+        "forecasting_accuracy": forecasting_block,
     }
 
 
@@ -641,6 +652,49 @@ def briefing_to_markdown(briefing: dict) -> str:
             lines.append("- **Key decisions:** " + "; ".join(t["key_decisions"]))
         if t.get("adjudication_summary"):
             lines.append(f"- **Adjudication:** {t['adjudication_summary']}")
+        lines.append("")
+
+    # Forecasting accuracy (optional — only when ≥1 forecast has been resolved).
+    fcast = b.get("forecasting_accuracy")
+    if fcast:
+        overall = fcast.get("overall_brier_score")
+        overall_txt = f"{overall:.3f}" if isinstance(overall, (int, float)) else "—"
+        lines += ["## Forecasting Accuracy", "",
+                  f"_{fcast.get('methodology_note', '')}_", "",
+                  f"- Overall Brier score: **{overall_txt}**",
+                  f"- {fcast.get('calibration_summary', '')}",
+                  ""]
+
+        tc = fcast.get("turn_calibration", [])
+        if tc:
+            lines += ["### Per-Turn Calibration (mean estimate vs actual rate)", "",
+                      "| Turn | Mean estimate | Actual rate | Brier |",
+                      "|------|---------------|-------------|-------|"]
+            for t in tc:
+                me, ar, br = t.get("mean_estimate"), t.get("actual_rate"), t.get("brier_score")
+                lines.append(
+                    f"| {t.get('turn_num')} "
+                    f"| {f'{me*100:.0f}%' if isinstance(me, (int, float)) else '—'} "
+                    f"| {f'{ar*100:.0f}%' if isinstance(ar, (int, float)) else '—'} "
+                    f"| {f'{br:.3f}' if isinstance(br, (int, float)) else '—'} |"
+                )
+            lines.append("")
+
+        notable = fcast.get("notable_mispredictions", [])
+        lines += ["### Notable Mispredictions", ""]
+        if notable:
+            lines += ["| Turn | Question | Estimate | Outcome | Brier component |",
+                      "|------|----------|----------|---------|-----------------|"]
+            for m in notable:
+                est = m.get("estimate")
+                lines.append(
+                    f"| {m.get('turn_num')} | {m.get('question')} "
+                    f"| {f'{est*100:.0f}%' if isinstance(est, (int, float)) else '—'} "
+                    f"| {'occurred' if m.get('outcome') else 'did not occur'} "
+                    f"| {m.get('brier_component')} |"
+                )
+        else:
+            lines.append("_None — no confidently-wrong forecasts._")
         lines.append("")
 
     # Final state.

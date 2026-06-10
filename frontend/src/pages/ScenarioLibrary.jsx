@@ -108,6 +108,7 @@ function MyScenarios({ userRole }) {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('All')
+  const [forecastingEnabled, setForecastingEnabled] = useState(false)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -135,6 +136,7 @@ function MyScenarios({ userRole }) {
         max_turns: wc.duration_turns || 8,
         time_per_turn_hours: 9,
         faction_assignments,
+        forecasting_enabled: forecastingEnabled,
       })
       navigate(`/sessions/${res.data.id}`)
     } catch (e) {
@@ -203,6 +205,17 @@ function MyScenarios({ userRole }) {
           ))}
         </div>
       </div>
+
+      {/* Optional analytic overlay applied to sessions launched from here */}
+      <label className="flex items-center gap-2 mb-6 text-xs font-mono text-theater-gray cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={forecastingEnabled}
+          onChange={e => setForecastingEnabled(e.target.checked)}
+          className="accent-theater-accent"
+        />
+        Enable forecasting (track your prediction accuracy) for new sessions
+      </label>
 
       {typeFilter === 'All' && (
         <div className="mb-6">
@@ -367,6 +380,7 @@ function PublicLibrary() {
   const [sort, setSort] = useState('usage_count')
   const [page, setPage] = useState(1)
   const [cloning, setCloning] = useState(null)
+  const [forecastingEnabled, setForecastingEnabled] = useState(false)
   const navigate = useNavigate()
   const LIMIT = 18
 
@@ -396,6 +410,7 @@ function PublicLibrary() {
         max_turns: wc.duration_turns || 8,
         time_per_turn_hours: 9,
         faction_assignments,
+        forecasting_enabled: forecastingEnabled,
       })
       navigate(`/sessions/${sessionRes.data.id}`)
     } catch (e) {
@@ -431,6 +446,17 @@ function PublicLibrary() {
           <option value="title">Alphabetical</option>
         </select>
       </div>
+
+      {/* Optional analytic overlay applied to sessions launched via Clone & Play */}
+      <label className="flex items-center gap-2 mb-6 text-xs font-mono text-theater-gray cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={forecastingEnabled}
+          onChange={e => setForecastingEnabled(e.target.checked)}
+          className="accent-theater-accent"
+        />
+        Enable forecasting (track your prediction accuracy) for new sessions
+      </label>
 
       {loading ? (
         <LoadingSpinner label="Loading library..." />

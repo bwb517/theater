@@ -9,6 +9,7 @@ from database import get_db
 from auth import get_current_user, require_role
 from game_consts import MOVEMENT_RATES, haversine_km
 import rules_engine
+import forecasting
 import models
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -72,6 +73,7 @@ class SessionCreate(BaseModel):
     faction_assignments: list = []
     max_turns: int = 8
     time_per_turn_hours: int = 0  # 0 = auto-derive from scenario timeframe
+    forecasting_enabled: bool = False  # opt-in probabilistic forecasting overlay
 
 class MoveSubmit(BaseModel):
     faction_id: str
@@ -79,6 +81,13 @@ class MoveSubmit(BaseModel):
 
 class GMNote(BaseModel):
     notes: str
+
+class ForecastSubmit(BaseModel):
+    p_blue_wins: float
+    p_red_wins: float
+    p_escalation: float
+    p_key_objective_captured: float
+    rationale: Optional[str] = None
 
 def serialize_turn(t: models.TurnLog) -> dict:
     return {
@@ -105,6 +114,8 @@ def serialize_session(s: models.GameSession) -> dict:
         "faction_assignments": json.loads(s.faction_assignments or "[]"),
         "current_game_state": json.loads(s.current_game_state or "{}"),
         "previous_game_state": json.loads(s.previous_game_state or "{}"),
+        "forecasting_enabled": bool(s.forecasting_enabled),
+        "total_brier_score": s.total_brier_score,
         "created_by": s.created_by,
         "created_at": s.created_at.isoformat() if s.created_at else None,
         "updated_at": s.updated_at.isoformat() if s.updated_at else None,
@@ -178,6 +189,7 @@ def create_session(
         time_per_turn_hours=time_per_turn_hours,
         faction_assignments=json.dumps(req.faction_assignments),
         current_game_state=json.dumps(initial_state),
+        forecasting_enabled=req.forecasting_enabled,
         created_by=user.id if user else None
     )
     db.add(session)
@@ -507,6 +519,79 @@ def get_turn_audit(
         "outcome": json.loads(audit.turn_outcome or "{}"),
     }
 
+@router.post("/{session_id}/turns/{turn_num}/forecast")
+def submit_forecast(
+    session_id: str,
+    turn_num: int,
+    req: ForecastSubmit,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Submit a pre-turn probability forecast for the current, un-adjudicated turn.
+
+    Optional overlay — only allowed when the session has forecasting enabled, for the
+    current turn, before it has been adjudicated. One forecast per (session, turn, user):
+    re-submitting overwrites the prior estimate.
+    """
+    session = db.query(models.GameSession).filter(models.GameSession.id == session_id).first()
+    if not session:
+        raise HTTPException(404, "Session not found")
+    if not session.forecasting_enabled:
+        raise HTTPException(400, "Forecasting is not enabled for this session")
+    if turn_num != session.current_turn:
+        raise HTTPException(400, "You can only forecast the current turn")
+
+    turn_log = db.query(models.TurnLog).filter(
+        models.TurnLog.session_id == session_id,
+        models.TurnLog.turn_number == turn_num,
+    ).first()
+    if turn_log and turn_log.adjudication:
+        raise HTTPException(409, "Turn has already been adjudicated — forecast must precede adjudication")
+
+    fc = db.query(models.TurnForecast).filter(
+        models.TurnForecast.session_id == session_id,
+        models.TurnForecast.turn_number == turn_num,
+        models.TurnForecast.user_id == (user.id if user else None),
+    ).first()
+    if not fc:
+        fc = models.TurnForecast(
+            session_id=session_id,
+            turn_number=turn_num,
+            user_id=user.id if user else None,
+        )
+        db.add(fc)
+
+    fc.p_blue_wins = req.p_blue_wins
+    fc.p_red_wins = req.p_red_wins
+    fc.p_escalation = req.p_escalation
+    fc.p_key_objective_captured = req.p_key_objective_captured
+    fc.rationale = req.rationale
+    fc.submitted_at = datetime.utcnow()
+    if turn_log:
+        fc.turn_id = turn_log.id
+    # Re-submission before adjudication resets any (shouldn't exist) resolution.
+    fc.resolved_at = None
+    fc.brier_score = None
+
+    db.commit()
+    db.refresh(fc)
+    return {"forecast_id": fc.id, "submitted_at": fc.submitted_at.isoformat()}
+
+@router.get("/{session_id}/forecasting-summary")
+def forecasting_summary(
+    session_id: str,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Forecast accuracy summary: per-turn estimates vs outcomes, Brier avg, calibration."""
+    session = db.query(models.GameSession).filter(models.GameSession.id == session_id).first()
+    if not session:
+        raise HTTPException(404, "Session not found")
+    rows = db.query(models.TurnForecast).filter(
+        models.TurnForecast.session_id == session_id,
+    ).all()
+    return forecasting.build_forecasting_summary(rows, total_turns=session.current_turn)
+
 @router.delete("/{session_id}", status_code=204)
 def delete_session(
     session_id: str,
@@ -518,6 +603,7 @@ def delete_session(
         raise HTTPException(404, "Session not found")
     if session.created_by != current_user.id and current_user.role not in ("admin", "gamemaster"):
         raise HTTPException(403, "Not authorized to delete this session")
+    db.query(models.TurnForecast).filter(models.TurnForecast.session_id == session_id).delete()
     db.query(models.TurnLog).filter(models.TurnLog.session_id == session_id).delete()
     db.query(models.AARReport).filter(models.AARReport.session_id == session_id).delete()
     db.query(models.MonteCarloResult).filter(models.MonteCarloResult.session_id == session_id).delete()

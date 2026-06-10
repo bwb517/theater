@@ -97,6 +97,12 @@ export const briefingApi = {
   exportPdf: (sessionId) => api.get(`/sessions/${sessionId}/briefing-export/pdf`, { responseType: 'blob' }),
 }
 
+// Forecasting (optional per-turn probabilistic overlay)
+export const forecastingApi = {
+  submit: (sessionId, turnNum, data) => api.post(`/sessions/${sessionId}/turns/${turnNum}/forecast`, data),
+  summary: (sessionId) => api.get(`/sessions/${sessionId}/forecasting-summary`),
+}
+
 // Admin
 export const adminApi = {
   stats: () => api.get('/admin/stats'),

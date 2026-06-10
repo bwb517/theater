@@ -25,6 +25,8 @@ _MIGRATIONS = {
     "game_sessions": {
         "ai_personality_overrides": "TEXT",
         "previous_game_state": "TEXT",
+        "forecasting_enabled": "BOOLEAN DEFAULT FALSE",
+        "total_brier_score": "REAL" if _is_sqlite else "DOUBLE PRECISION",
     },
     "token_usage": {
         "user_id": "TEXT",

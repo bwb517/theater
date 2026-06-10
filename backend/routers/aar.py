@@ -13,12 +13,16 @@ from limiter import limiter
 import models
 import ai_client
 import briefing
+import forecasting
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.graphics.shapes import Drawing
+from reportlab.graphics.charts.barcharts import VerticalBarChart
+from reportlab.graphics.charts.legends import Legend
 
 
 def _esc(text) -> str:
@@ -90,6 +94,19 @@ async def generate_aar(
     except Exception as e:
         raise HTTPException(500, f"AAR generation failed: {str(e)}")
 
+    # Section 8: Forecasting Accuracy — only when forecasting is enabled and ≥1 forecast
+    # exists. Numbers are deterministic; only the narrative paragraph uses Claude (hybrid),
+    # and a templated fallback keeps the section rendering if that call fails.
+    if session.forecasting_enabled:
+        forecast_rows = db.query(models.TurnForecast).filter(
+            models.TurnForecast.session_id == session_id
+        ).all()
+        if forecast_rows:
+            section8 = await _build_forecasting_section(
+                forecast_rows, session, user_id=user.id if user else None
+            )
+            aar_content["section_8_forecasting_accuracy"] = section8
+
     aar = models.AARReport(
         session_id=session_id,
         content=json.dumps(aar_content),
@@ -151,6 +168,50 @@ def get_shared_aar(token: str, db: Session = Depends(get_db)):
         "content": json.loads(aar.content or "{}"),
         "created_at": aar.created_at.isoformat()
     }
+
+def _fallback_calibration_narrative(summary: dict) -> str:
+    """Templated calibration narrative used when the Claude call is unavailable."""
+    rating = summary.get("calibration_rating", "Insufficient data")
+    avg = summary.get("average_brier_score")
+    avg_txt = f"{avg:.3f}" if isinstance(avg, (int, float)) else "—"
+    base = (
+        f"Across {summary.get('forecasts_resolved', 0)} scored turn(s), your average Brier "
+        f"score was {avg_txt} (0 = perfect, 2 = worst; Brier, 1950). "
+    )
+    tail = {
+        "Well-calibrated": "Your stated probabilities tracked actual outcomes closely — keep "
+                           "expressing uncertainty at the level you genuinely feel.",
+        "Overconfident": "You tended to state higher probabilities than events warranted — "
+                         "pull extreme estimates back toward the middle when evidence is thin.",
+        "Underconfident": "You tended to hedge below what outcomes warranted — when the "
+                          "evidence is strong, commit to more decisive probabilities.",
+    }.get(rating, "Submit more forecasts to build a meaningful calibration picture.")
+    return base + tail
+
+
+async def _build_forecasting_section(forecast_rows, session, user_id=None) -> dict:
+    """Deterministic Section 8 payload + a Claude (or templated) narrative paragraph."""
+    summary = forecasting.build_forecasting_summary(
+        forecast_rows, total_turns=session.current_turn
+    )
+    try:
+        narrative = await ai_client.forecasting_narrative(
+            summary, user_id=user_id, session_id=session.id
+        )
+        if not narrative:
+            narrative = _fallback_calibration_narrative(summary)
+    except Exception:
+        narrative = _fallback_calibration_narrative(summary)
+    return {
+        "average_brier_score": summary.get("average_brier_score"),
+        "calibration_rating": summary.get("calibration_rating"),
+        "forecasts_submitted": summary.get("forecasts_submitted"),
+        "forecasts_resolved": summary.get("forecasts_resolved"),
+        "narrative": narrative,
+        "brier_note": summary.get("brier_note"),
+        "turn_by_turn": summary.get("turn_by_turn", []),
+    }
+
 
 def build_aar_pdf(content: dict) -> bytes:
     buffer = BytesIO()
@@ -271,6 +332,46 @@ def build_aar_pdf(content: dict) -> bytes:
     for rec in s6.get("planning_recommendations", []):
         story.append(Paragraph(f"• {rec}", body_style))
 
+    # Section 8: Forecasting Accuracy (optional — only present when forecasting was enabled)
+    s8 = content.get("section_8_forecasting_accuracy")
+    if s8:
+        add_section(8, "FORECASTING ACCURACY")
+        avg = s8.get("average_brier_score")
+        avg_txt = f"{avg:.3f}" if isinstance(avg, (int, float)) else "—"
+        story.append(Paragraph(
+            f"<b>Average Brier Score:</b> {_esc(avg_txt)} &nbsp;&nbsp; "
+            f"<b>Calibration:</b> {_esc(s8.get('calibration_rating', '—'))}", h2_style))
+        story.append(Paragraph(_esc(s8.get("narrative", "")), body_style))
+        rows = [["Turn", "P(Blue)", "Blue", "P(Red)", "Red", "P(Esc)", "Esc", "P(Obj)", "Obj", "Brier"]]
+        for t in s8.get("turn_by_turn", []):
+            def _p(v):
+                return f"{float(v):.2f}" if isinstance(v, (int, float)) else "—"
+            def _b(v):
+                return "✓" if v else ("✗" if v is not None else "—")
+            br = t.get("brier_score")
+            rows.append([
+                str(t.get("turn_num", "—")),
+                _p(t.get("p_blue_wins")), _b(t.get("blue_achieved")),
+                _p(t.get("p_red_wins")), _b(t.get("red_achieved")),
+                _p(t.get("p_escalation")), _b(t.get("escalation_occurred")),
+                _p(t.get("p_key_objective_captured")), _b(t.get("key_objective_captured")),
+                f"{br:.3f}" if isinstance(br, (int, float)) else "—",
+            ])
+        f_table = Table(rows, hAlign="LEFT")
+        f_table.setStyle(TableStyle([
+            ('FONTSIZE', (0, 0), (-1, -1), 7),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor("#374151")),
+            ('GRID', (0, 0), (-1, -1), 0.25, colors.HexColor("#e5e7eb")),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ]))
+        story.append(f_table)
+        if s8.get("brier_note"):
+            story.append(Spacer(1, 0.05 * inch))
+            story.append(Paragraph(f"<i>{_esc(s8['brier_note'])}</i>", ParagraphStyle(
+                "FNote", parent=body_style, fontSize=8, textColor=colors.HexColor("#6b7280"))))
+
     # Footer
     story.append(Spacer(1, 0.3*inch))
     story.append(HRFlowable(width="100%", thickness=1, color=dark_blue))
@@ -354,11 +455,18 @@ def _build_session_briefing(session_id: str, db: Session) -> dict:
         "max_turns": session.max_turns,
     }
 
+    forecasts = None
+    if session.forecasting_enabled:
+        forecasts = db.query(models.TurnForecast).filter(
+            models.TurnForecast.session_id == session.id
+        ).all()
+
     return briefing.build_briefing(
         scenario=scenario,
         adjudication_rows=adjudication_rows,
         final_state=final_state,
         session_meta=session_meta,
+        forecasts=forecasts,
     )
 
 
@@ -406,6 +514,51 @@ async def get_briefing_export_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+def _calibration_chart(turn_calibration: list) -> Drawing:
+    """Grouped bar chart: mean forecast estimate vs actual outcome rate, per turn (%).
+
+    A well-calibrated forecaster's blue (estimate) and green (actual) bars sit at the
+    same height each turn. Returns a reportlab Drawing.
+    """
+    turns = [t.get("turn_num") for t in turn_calibration]
+    estimates = [round((t.get("mean_estimate") or 0) * 100) for t in turn_calibration]
+    actuals = [round((t.get("actual_rate") or 0) * 100) for t in turn_calibration]
+
+    drawing = Drawing(440, 215)
+    chart = VerticalBarChart()
+    chart.x = 35
+    chart.y = 25
+    chart.width = 375
+    chart.height = 150
+    chart.data = [estimates, actuals]
+    chart.categoryAxis.categoryNames = [f"T{t}" for t in turns]
+    chart.categoryAxis.labels.fontSize = 8
+    chart.valueAxis.valueMin = 0
+    chart.valueAxis.valueMax = 100
+    chart.valueAxis.valueStep = 25
+    chart.valueAxis.labels.fontSize = 8
+    chart.bars[0].fillColor = colors.HexColor("#2563eb")  # mean estimate
+    chart.bars[1].fillColor = colors.HexColor("#16a34a")  # actual rate
+    chart.barWidth = 5
+    chart.groupSpacing = 12
+    chart.barSpacing = 1
+    drawing.add(chart)
+
+    legend = Legend()
+    legend.x = 35
+    legend.y = 200
+    legend.deltax = 140
+    legend.fontSize = 8
+    legend.alignment = "right"
+    legend.columnMaximum = 1
+    legend.colorNamePairs = [
+        (colors.HexColor("#2563eb"), "Mean estimate %"),
+        (colors.HexColor("#16a34a"), "Actual rate %"),
+    ]
+    drawing.add(legend)
+    return drawing
 
 
 def build_briefing_pdf(data: dict) -> bytes:
@@ -506,6 +659,61 @@ def build_briefing_pdf(data: dict) -> bytes:
             story.append(Paragraph(_esc(t["adjudication_summary"]), body_style))
         for kd in t.get("key_decisions", []):
             story.append(Paragraph(f"• {_esc(kd)}", body_style))
+
+    # Forecasting accuracy (optional — only when ≥1 forecast has been resolved)
+    fcast = data.get("forecasting_accuracy")
+    if fcast:
+        section("FORECASTING ACCURACY")
+        overall = fcast.get("overall_brier_score")
+        overall_txt = f"{overall:.3f}" if isinstance(overall, (int, float)) else "—"
+        story.append(Paragraph(f"<b>Overall Brier:</b> {_esc(overall_txt)}", h2_style))
+        story.append(Paragraph(_esc(fcast.get("calibration_summary", "")), body_style))
+
+        # Calibration chart: mean estimate vs actual rate per turn. Wrapped so a chart
+        # failure degrades to the tables rather than breaking the whole export.
+        tc = fcast.get("turn_calibration", [])
+        if tc:
+            try:
+                story.append(_calibration_chart(tc))
+                story.append(Paragraph(
+                    "<i>Blue = mean forecast probability; green = actual outcome rate, per turn. "
+                    "Equal-height bars indicate good calibration.</i>",
+                    ParagraphStyle("BCap", parent=body_style, fontSize=8,
+                                   textColor=colors.HexColor("#6b7280"))))
+            except Exception:
+                pass
+
+        # Notable mispredictions table
+        notable = fcast.get("notable_mispredictions", [])
+        story.append(Paragraph("Notable Mispredictions", h2_style))
+        if notable:
+            m_rows = [["Turn", "Question", "Estimate", "Outcome", "Brier"]]
+            for m in notable:
+                est = m.get("estimate")
+                m_rows.append([
+                    str(m.get("turn_num", "—")),
+                    _esc(m.get("question", "—")),
+                    f"{est*100:.0f}%" if isinstance(est, (int, float)) else "—",
+                    "occurred" if m.get("outcome") else "did not occur",
+                    str(m.get("brier_component", "—")),
+                ])
+            m_table = Table(m_rows, hAlign="LEFT", colWidths=[0.5*inch, 2.4*inch, 0.9*inch, 1.2*inch, 0.7*inch])
+            m_table.setStyle(TableStyle([
+                ('FONTSIZE', (0, 0), (-1, -1), 8),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor("#374151")),
+                ('GRID', (0, 0), (-1, -1), 0.25, colors.HexColor("#e5e7eb")),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ]))
+            story.append(m_table)
+        else:
+            story.append(Paragraph("None — no confidently-wrong forecasts.", body_style))
+
+        if fcast.get("methodology_note"):
+            story.append(Spacer(1, 0.05 * inch))
+            story.append(Paragraph(f"<i>{_esc(fcast['methodology_note'])}</i>", ParagraphStyle(
+                "BFNote", parent=body_style, fontSize=8, textColor=colors.HexColor("#6b7280"))))
 
     # Footer
     story.append(Spacer(1, 0.3 * inch))

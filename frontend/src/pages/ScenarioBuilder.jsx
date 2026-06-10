@@ -278,6 +278,7 @@ export default function ScenarioBuilder() {
   const [error, setError] = useState('')
   const [expandedFactions, setExpandedFactions] = useState({})
   const [mapUnits, setMapUnits] = useState([])
+  const [forecastingEnabled, setForecastingEnabled] = useState(false)
 
   useEffect(() => {
     if (id) {
@@ -361,7 +362,8 @@ export default function ScenarioBuilder() {
       title: scenario?.title || 'New Session',
       max_turns: scenario?.win_conditions?.duration_turns || 6,
       time_per_turn_hours: 0,  // backend auto-derives from scenario timeframe
-      faction_assignments: []
+      faction_assignments: [],
+      forecasting_enabled: forecastingEnabled,
     })
     navigate(`/sessions/${res.data.id}`)
   }
@@ -468,6 +470,18 @@ export default function ScenarioBuilder() {
             <Save className="w-3.5 h-3.5" />
             {saving ? 'Saving...' : 'Save'}
           </button>
+          <label
+            className="flex items-center gap-1.5 text-theater-muted hover:text-theater-text text-xs font-mono cursor-pointer select-none"
+            title="Assign probabilities to each turn's outcomes and get a Brier calibration score"
+          >
+            <input
+              type="checkbox"
+              checked={forecastingEnabled}
+              onChange={e => setForecastingEnabled(e.target.checked)}
+              className="accent-theater-accent"
+            />
+            Forecasting
+          </label>
           <button
             onClick={handleLaunch}
             className="flex items-center gap-2 bg-theater-accent hover:bg-theater-accent-light text-white px-4 py-1.5 rounded text-xs font-mono font-semibold transition-colors"
