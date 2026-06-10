@@ -46,7 +46,9 @@ def _fake_response(usage):
 
 def _run_adjudication(monkeypatch, usage):
     monkeypatch.setattr(ai_client, "get_client", lambda: _FakeClient(_fake_response(usage)))
-    return asyncio.run(
+    # adjudicate_turn returns (result, audit_payload); the audit trail half is
+    # exercised by the router, so here we keep just the parsed AI result.
+    result, _audit = asyncio.run(
         ai_client.adjudicate_turn(
             scenario={"title": "Test", "scenario_type": "Tactical", "situation": {}},
             blue_moves=[],
@@ -57,6 +59,7 @@ def _run_adjudication(monkeypatch, usage):
             session_id="session-abc",
         )
     )
+    return result
 
 
 def test_turn_writes_token_usage_row(monkeypatch):

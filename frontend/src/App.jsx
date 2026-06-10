@@ -8,6 +8,7 @@ import GameSession from './pages/GameSession'
 import RedTeamConsole from './pages/RedTeamConsole'
 import MonteCarloAnalyzer from './pages/MonteCarloAnalyzer'
 import AARGenerator from './pages/AARGenerator'
+import BriefingExport from './pages/BriefingExport'
 import Admin from './pages/Admin'
 import Settings from './pages/Settings'
 import Login from './pages/Login'
@@ -77,6 +78,7 @@ export default function App() {
             <Route path="sessions/:id/red-team" element={<RedTeamConsole />} />
             <Route path="sessions/:id/monte-carlo" element={<MonteCarloAnalyzer />} />
             <Route path="sessions/:id/aar" element={<AARGenerator />} />
+            <Route path="sessions/:id/briefing" element={<BriefingExport />} />
             <Route path="admin" element={<Admin />} />
             <Route path="settings" element={<Settings />} />
           </Route>

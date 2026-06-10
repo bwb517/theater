@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { aarApi, sessionsApi } from '../api/client'
 import { LoadingSpinner, AIThinking } from '../components/LoadingSpinner'
-import { ArrowLeft, FileText, Download, Share2, Zap, ChevronRight, AlertCircle, ExternalLink } from 'lucide-react'
+import { ArrowLeft, FileText, Download, Share2, Zap, ChevronRight, AlertCircle, ExternalLink, ClipboardList } from 'lucide-react'
 
 function Section({ number, title, children, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen)
@@ -179,6 +179,14 @@ ${s5.map(l => `**LL-${l.lesson_number} [${l.warfighting_function}]**\n- Observat
           </h1>
           <p className="text-theater-muted text-sm">{session?.title}</p>
         </div>
+        <button
+          onClick={() => navigate(`/sessions/${id}/briefing`)}
+          className="flex items-center gap-2 border border-theater-border hover:border-theater-accent/40 text-theater-gray hover:text-theater-text px-3 py-2 rounded text-xs font-mono transition-all"
+          title="Deterministic analyst briefing (no AI)"
+        >
+          <ClipboardList className="w-3.5 h-3.5" />
+          BRIEFING
+        </button>
         {content && (
           <div className="flex items-center gap-2">
             <button onClick={handleCopyShareLink} className="flex items-center gap-2 border border-theater-border hover:border-theater-accent/40 text-theater-gray hover:text-theater-text px-3 py-2 rounded text-xs font-mono transition-all">

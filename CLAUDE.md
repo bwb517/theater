@@ -18,13 +18,18 @@ Full-stack AI military wargaming platform. FastAPI backend + React/Vite frontend
 | `backend/auth.py` | JWT + bcrypt: `hash_password`, `create_access_token`, `get_current_user` dependency, `get_optional_user` (public routes), `require_role` decorator |
 | `backend/limiter.py` | slowapi `Limiter` instance — import and apply `@limiter.limit("N/period")` on expensive endpoints |
 | `backend/ai_client.py` | **All Claude calls** — see AI Client section below |
+| `backend/pricing.py` | Token cost calculator — `compute_cost(input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, model)` returns USD. Pricing per-1M-tokens for Sonnet/Opus/Haiku; handles cache write/read multipliers |
+| `backend/game_consts.py` | Movement rates by unit type, strength/WTF/C2 enums, great-circle geometry helpers (`haversine_km`, `initial_bearing_deg`, `point_at_distance`) — shared truth between rules engine and live gameplay |
+| `backend/rules_engine.py` | Deterministic adjudication validator — `validate_game_state()` (schema check), `apply_adjudication()` (apply LLM proposals legally); enforces movement/strength/score caps before mutations touch DB |
 | `backend/seed_data.py` | Demo users (admin/gamemaster/player1, pw: `theater123`), 50+ unit templates, 5 scenario templates, demo session with 4 turns |
 | `backend/routers/auth.py` | `POST /register`, `POST /login`, `GET /me` |
 | `backend/routers/scenarios.py` | Scenario CRUD, `POST /generate` (NL → AI), unit library, OOB import from text/file/Wikipedia |
 | `backend/routers/sessions.py` | Session CRUD, submit moves, advance-turn, GM notes, game-state update |
 | `backend/routers/red_team.py` | `POST /red-team` (AI moves), `POST /adjudicate`, `PUT /personality` |
 | `backend/routers/monte_carlo.py` | `POST /run` (rate-limited 5/hour), `GET` by ID / session / scenario |
-| `backend/routers/aar.py` | Generate 7-section AAR, PDF export via reportlab, public share token (no auth required) |
+| `backend/routers/aar.py` | Generate 7-section AAR via Claude, PDF export via reportlab, public share token (no auth); also briefing export endpoints |
+| `backend/routers/export.py` | Session JSON/Markdown export, scenario template export — deterministic, no AI |
+| `backend/briefing.py` | Pure logic: `build_briefing()` computes structured briefing from session + AdjudicationLog (timeline, turning points, state evolution, outcome). Single source of truth for strength metric definition (`STRENGTH_METRIC_NOTE`). |
 | `backend/routers/admin.py` | Stats, user list, session audit — admin role required |
 
 ---
@@ -68,6 +73,9 @@ Full-stack AI military wargaming platform. FastAPI backend + React/Vite frontend
 - **Vite proxies** `/api` → `http://localhost:8000` in dev — no CORS issues locally
 - **`faction_assignments`** on `GameSession` drives player unit visibility. `ScenarioLibrary.jsx` auto-derives it from `scenario.factions[].role` at session creation (`'AI-controlled'` → `'AI'`, everything else → `'Player'`). `GameSession.jsx` falls back to scenario roles when the array is empty (handles legacy sessions stored with `[]`)
 - **`ai_personality_overrides`** on `GameSession` is a JSON column (faction_id → personality string) added via migration; `RedTeamConsole.jsx` reads/writes it via `PUT /api/red-team/personality`
+- **Token logging & cost tracking**: Every Claude call logs its usage to the `TokenUsage` table via `pricing.compute_cost()` which multiplies input/output/cache_write/cache_read tokens by their per-1M rates. New AI functions must call `_log_tokens(function_name, response.usage)` after every Anthropic API call to maintain audit trail and budget visibility
+- **Token efficiency**: Always use `_slim_game_state()` and `_slim_scenario_for_mc()` helpers before serializing game/scenario data to Claude prompts — they reduce token count by stripping non-essential arrays and verbose fields. Check `TokenUsage` table post-deployment to catch unexpected cost spikes
+- **Briefing export** (deterministic, no Claude): `GET /api/sessions/{id}/briefing-export` returns JSON with timeline, turning points, state evolution (mean force strength per turn), and outcome. Three formats: JSON, Markdown, PDF. `briefing.py` computes turning points by identifying turns with largest impact on outcome (via delta scoring). **Strength metric**: mean force strength is the average unit health (0-100) across a side's units, using manning % or strength-state mapping (Full=100, Degraded≈67, Critical≈33, Destroyed=0). Definition is in `briefing.STRENGTH_METRIC_NOTE` to ensure UI, Markdown, and PDF all describe it identically.
 
 ---
 
@@ -87,9 +95,44 @@ cd backend && python seed_data.py
 
 # API docs
 http://localhost:8000/docs
+
+# Briefing export endpoints (deterministic, no Claude)
+GET /api/sessions/{id}/briefing-export              # JSON with timeline, turning points, state evolution
+GET /api/sessions/{id}/briefing-export/markdown     # Same as Markdown
+GET /api/sessions/{id}/briefing-export/pdf          # Same as PDF (reportlab)
 ```
 
 Key `.env` vars: `ANTHROPIC_API_KEY`, `CLAUDE_MODEL` (default: `claude-sonnet-4-6`), `SECRET_KEY`, `DATABASE_URL` (default: `sqlite:///./theater.db`), `FRONTEND_URL` (default: `http://localhost:3000`), `TOKEN_BUDGET` (default: 1,000,000 — informational, not enforced automatically)
+
+---
+
+## Testing
+
+All tests are in `backend/tests/` and use pytest. The `conftest.py` sets up a throwaway SQLite DB and mocked `ANTHROPIC_API_KEY` before importing any backend modules — this prevents tests from hitting the real API or `theater.db`.
+
+```
+# Run all tests
+cd backend && python -m pytest
+
+# Run one test file
+python -m pytest tests/test_token_logging_integration.py
+
+# Run a specific test
+python -m pytest tests/test_rules_engine.py::test_strength_validation
+
+# Verbose output + stop on first failure
+python -m pytest -xvs
+
+# Show print() output
+python -m pytest -s
+```
+
+Common test patterns:
+- **Token logging**: `test_token_logging_integration.py` mocks the Anthropic client to verify `_log_tokens()` writes correct costs to the `TokenUsage` table. Note: `adjudicate_turn()` returns `(result, audit_payload)` tuple; tests unpack it.
+- **Rules engine**: `test_rules_engine.py` exercises deterministic validators in isolation (no DB/network)
+- **Cost calculation**: `test_cost_calc.py` verifies pricing multipliers for cache write/read and different models
+- **Export/library**: `test_export_library.py` tests session JSON/Markdown export, scenario publishing, cloning, and library search. Auth tokens encode `sub=user.id` (matching production login flow in `routers/auth.py`), not username.
+- **Briefing**: `test_briefing.py` verifies turning-point detection (state delta scoring), timeline assembly, and Markdown/JSON/PDF consistency. Tests use synthetic game states with known pivot points.
 
 ---
 

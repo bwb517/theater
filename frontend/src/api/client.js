@@ -89,6 +89,14 @@ export const aarApi = {
   getShared: (token) => api.get(`/sessions/aar/share/${token}`),
 }
 
+// Briefing export (deterministic analyst memo — no AI). Downloads use blob so the
+// JWT Bearer header is sent to the auth-protected markdown/pdf endpoints.
+export const briefingApi = {
+  get: (sessionId) => api.get(`/sessions/${sessionId}/briefing-export`),
+  exportMarkdown: (sessionId) => api.get(`/sessions/${sessionId}/briefing-export/markdown`, { responseType: 'blob' }),
+  exportPdf: (sessionId) => api.get(`/sessions/${sessionId}/briefing-export/pdf`, { responseType: 'blob' }),
+}
+
 // Admin
 export const adminApi = {
   stats: () => api.get('/admin/stats'),

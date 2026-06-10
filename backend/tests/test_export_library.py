@@ -40,7 +40,9 @@ def _make_user(db, username="tester", role="game_master"):
 
 
 def _auth_header(user):
-    token = create_access_token({"sub": user.username})
+    # get_current_user resolves the token subject against User.id (matching the
+    # real login/register flow in routers/auth.py), not the username.
+    token = create_access_token({"sub": user.id, "role": user.role})
     return {"Authorization": f"Bearer {token}"}
 
 

@@ -569,6 +569,12 @@ export default function GameSession() {
                     Generate AAR
                   </button>
                   <button
+                    onClick={() => { navigate(`/sessions/${id}/briefing`); setShowSessionMenu(false) }}
+                    className="w-full text-left px-4 py-2.5 text-theater-gray text-xs font-mono hover:bg-theater-bg transition-colors"
+                  >
+                    Briefing Export
+                  </button>
+                  <button
                     onClick={() => { handleDelete(); setShowSessionMenu(false) }}
                     className="w-full text-left px-4 py-2.5 text-theater-red text-xs font-mono hover:bg-theater-bg border-t border-theater-border transition-colors flex items-center gap-2"
                   >
