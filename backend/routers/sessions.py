@@ -7,6 +7,7 @@ from typing import Optional
 from datetime import datetime
 from database import get_db
 from auth import get_current_user, require_role
+from permissions import require_session_access, has_session_access
 from game_consts import MOVEMENT_RATES, haversine_km
 import rules_engine
 import forecasting
@@ -200,6 +201,8 @@ def create_session(
 @router.get("")
 def list_sessions(db: Session = Depends(get_db), user=Depends(get_current_user)):
     sessions = db.query(models.GameSession).order_by(models.GameSession.created_at.desc()).all()
+    if user.role not in ("admin", "game_master"):
+        sessions = [s for s in sessions if has_session_access(user, s)]
     return [serialize_session(s) for s in sessions]
 
 @router.get("/{session_id}")
@@ -207,6 +210,7 @@ def get_session(session_id: str, faction_id: Optional[str] = None, db: Session =
     s = db.query(models.GameSession).filter(models.GameSession.id == session_id).first()
     if not s:
         raise HTTPException(404, "Session not found")
+    require_session_access(user, s)
     data = serialize_session(s)
     if faction_id:
         state = data.get("current_game_state", {})
@@ -229,6 +233,7 @@ def submit_moves(
     session = db.query(models.GameSession).filter(models.GameSession.id == session_id).first()
     if not session:
         raise HTTPException(404, "Session not found")
+    require_session_access(user, session)
     if session.status != "Active":
         raise HTTPException(400, "Session is not active")
 
@@ -328,6 +333,10 @@ def save_gm_notes(
     db: Session = Depends(get_db),
     user=Depends(get_current_user)
 ):
+    session = db.query(models.GameSession).filter(models.GameSession.id == session_id).first()
+    if not session:
+        raise HTTPException(404, "Session not found")
+    require_session_access(user, session)
     turn_log = db.query(models.TurnLog).filter(
         models.TurnLog.session_id == session_id,
         models.TurnLog.turn_number == turn_number
@@ -368,6 +377,7 @@ def advance_turn(session_id: str, db: Session = Depends(get_db), user=Depends(ge
     session = db.query(models.GameSession).filter(models.GameSession.id == session_id).first()
     if not session:
         raise HTTPException(404, "Session not found")
+    require_session_access(user, session)
     if session.status == "Complete":
         raise HTTPException(400, "Session is already complete")
 
@@ -429,6 +439,7 @@ def update_status(
     session = db.query(models.GameSession).filter(models.GameSession.id == session_id).first()
     if not session:
         raise HTTPException(404, "Session not found")
+    require_session_access(user, session)
     if status not in ("Setup", "Active", "Paused", "Complete"):
         raise HTTPException(400, "Invalid status")
     session.status = status
@@ -445,6 +456,7 @@ def update_game_state(
     session = db.query(models.GameSession).filter(models.GameSession.id == session_id).first()
     if not session:
         raise HTTPException(404, "Session not found")
+    require_session_access(user, session)
     problems = rules_engine.validate_game_state(state)
     if problems:
         raise HTTPException(422, {"message": "Invalid game state", "problems": problems})
@@ -466,6 +478,7 @@ def capitulate(
     session = db.query(models.GameSession).filter(models.GameSession.id == session_id).first()
     if not session:
         raise HTTPException(404, "Session not found")
+    require_session_access(user, session)
     if session.status != "Active":
         raise HTTPException(400, "Session is not active")
     session.status = "Complete"
@@ -496,6 +509,10 @@ def get_turn_audit(
     user=Depends(get_current_user),
 ):
     """Return the verbatim AI audit trail for a specific turn."""
+    session = db.query(models.GameSession).filter(models.GameSession.id == session_id).first()
+    if not session:
+        raise HTTPException(404, "Session not found")
+    require_session_access(user, session)
     turn_log = db.query(models.TurnLog).filter(
         models.TurnLog.session_id == session_id,
         models.TurnLog.turn_number == turn_number,
@@ -536,6 +553,7 @@ def submit_forecast(
     session = db.query(models.GameSession).filter(models.GameSession.id == session_id).first()
     if not session:
         raise HTTPException(404, "Session not found")
+    require_session_access(user, session)
     if not session.forecasting_enabled:
         raise HTTPException(400, "Forecasting is not enabled for this session")
     if turn_num != session.current_turn:
@@ -587,6 +605,7 @@ def forecasting_summary(
     session = db.query(models.GameSession).filter(models.GameSession.id == session_id).first()
     if not session:
         raise HTTPException(404, "Session not found")
+    require_session_access(user, session)
     rows = db.query(models.TurnForecast).filter(
         models.TurnForecast.session_id == session_id,
     ).all()
@@ -601,6 +620,7 @@ def delete_session(
     session = db.query(models.GameSession).filter(models.GameSession.id == session_id).first()
     if not session:
         raise HTTPException(404, "Session not found")
+    require_session_access(current_user, session)
     if session.created_by != current_user.id and current_user.role not in ("admin", "gamemaster"):
         raise HTTPException(403, "Not authorized to delete this session")
     db.query(models.TurnForecast).filter(models.TurnForecast.session_id == session_id).delete()

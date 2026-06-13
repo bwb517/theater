@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./theater.db"
     frontend_url: str = "http://localhost:3000"
     token_budget: int = 1_000_000
+    user_daily_token_limit: int = 50_000
 
     class Config:
         env_file = ".env"

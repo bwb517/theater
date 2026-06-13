@@ -18,7 +18,7 @@ _TOTAL_TOKENS = (
 )
 
 @router.get("/stats")
-def get_stats(db: Session = Depends(get_db), user=Depends(get_current_user)):
+def get_stats(db: Session = Depends(get_db), user=Depends(require_role("admin"))):
     return {
         "total_scenarios": db.query(models.Scenario).count(),
         "template_scenarios": db.query(models.Scenario).filter(models.Scenario.is_template == True).count(),
@@ -31,7 +31,7 @@ def get_stats(db: Session = Depends(get_db), user=Depends(get_current_user)):
     }
 
 @router.get("/users")
-def list_users(db: Session = Depends(get_db), user=Depends(get_current_user)):
+def list_users(db: Session = Depends(get_db), user=Depends(require_role("admin"))):
     users = db.query(models.User).all()
     return [{
         "id": u.id,
@@ -255,7 +255,7 @@ def reset_user_password(
     return {"message": f"Password reset for {user.username}"}
 
 @router.get("/sessions")
-def list_all_sessions(db: Session = Depends(get_db), user=Depends(get_current_user)):
+def list_all_sessions(db: Session = Depends(get_db), user=Depends(require_role("admin"))):
     sessions = db.query(models.GameSession).order_by(models.GameSession.created_at.desc()).all()
     return [{
         "id": s.id,

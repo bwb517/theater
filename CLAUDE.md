@@ -12,11 +12,13 @@ Full-stack AI military wargaming platform. FastAPI backend + React/Vite frontend
 
 | File | Purpose |
 |------|---------|
-| `backend/main.py` | App root — CORS middleware, `_run_migrations()` for SQLite ALTER TABLE, registers all 7 routers, `/health` endpoint |
-| `backend/database.py` | SQLAlchemy engine/session (WAL mode for SQLite), Pydantic `Settings`, LRU-cached `get_settings()`, reads `.env` |
+| `backend/main.py` | App root — CORS middleware, `_check_migrations()` startup check (warns if Alembic migrations pending), registers all 9 routers (8 domain + `me_router`), `/health` endpoint |
+| `backend/database.py` | SQLAlchemy engine/session (WAL mode for SQLite), Pydantic `Settings`, LRU-cached `get_settings()`, reads `.env`. `user_daily_token_limit` (default 50 000) is the per-user daily cap read by `cost_guard.py` |
 | `backend/models.py` | ORM models: `User`, `Scenario`, `GameSession`, `TurnLog`, `TurnForecast`, `MonteCarloResult`, `AARReport`, `UnitTemplate`, `TokenUsage`, `AdjudicationLog` — all UUID PKs. `GameSession.forecasting_enabled`/`total_brier_score` drive the optional forecasting overlay |
 | `backend/auth.py` | JWT + bcrypt: `hash_password`, `create_access_token`, `get_current_user` dependency, `get_optional_user` (public routes), `require_role` decorator |
-| `backend/limiter.py` | slowapi `Limiter` instance — import and apply `@limiter.limit("N/period")` on expensive endpoints |
+| `backend/limiter.py` | slowapi `Limiter` with `_client_ip` key function — reads `X-Forwarded-For` (leftmost IP) to rate-limit real clients behind the Caddy proxy; falls back to `request.client.host` in local dev |
+| `backend/permissions.py` | Shared per-resource authorization — `has_session_access(user, session)` (bool, for list filtering) and `require_session_access(user, session)` (raises HTTP 403). Import and call `require_session_access` immediately after the 404 check on every session-specific route |
+| `backend/cost_guard.py` | `check_token_budget` FastAPI dep — enforces per-user daily billable-token cap (input + output + cache_write); raises HTTP 429 if exceeded; admins exempt. Also contains `me_router` with `GET /api/me/token-status` |
 | `backend/ai_client.py` | **All Claude calls** — see AI Client section below |
 | `backend/pricing.py` | Token cost calculator — `compute_cost(input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, model)` returns USD. Pricing per-1M-tokens for Sonnet/Opus/Haiku; handles cache write/read multipliers |
 | `backend/game_consts.py` | Movement rates by unit type, strength/WTF/C2 enums, great-circle geometry helpers (`haversine_km`, `initial_bearing_deg`, `point_at_distance`) — shared truth between rules engine and live gameplay |
@@ -68,12 +70,14 @@ Full-stack AI military wargaming platform. FastAPI backend + React/Vite frontend
 - **Game state** stored as JSON in `GameSession.current_game_state`; turn logs are append-only for audit trail
 - **Game state initialization** (`routers/sessions.py`): `MOVEMENT_RATES`, `MUNITIONS_DEFAULTS`, and `MUNITIONS_BY_CAPABILITY` dicts drive unit capability seeding at session creation; `_wtf_from_posture()` derives initial will-to-fight from faction starting posture
 - **Auth**: `get_current_user` dependency on protected endpoints; `get_optional_user` for endpoints accessible both authenticated and anonymously (e.g. public AAR share); `require_role("admin")` decorator for admin gates
-- **Schema migrations**: SQLite doesn't support `CREATE TABLE ... IF NOT EXISTS` for new columns — add new columns to `_run_migrations()` in `main.py` using `ALTER TABLE`, not to `create_all()`
-- **Rate limiting**: import `limiter` from `backend/limiter.py` and decorate with `@limiter.limit("5/hour")` on AI-heavy endpoints — Monte Carlo is already rate-limited
+- **Per-resource authorization**: call `require_session_access(user, session)` from `backend/permissions.py` immediately after the 404 check on every session-specific route. For list filtering use `has_session_access(user, session)` (returns bool). Admins and game-masters always pass; players pass only if `created_by` matches or their `user_id` appears in `faction_assignments`.
+- **Per-user daily token cap**: replace `get_current_user` with `check_token_budget` (from `backend/cost_guard.py`) on any endpoint that calls Claude — this enforces `USER_DAILY_TOKEN_LIMIT` (default 50 000 billable tokens/day, configurable via `.env`). On optional-user routes (monte_carlo, aar), add `_: models.User = Depends(check_token_budget)` as an additional guard param. Admins are always exempt.
+- **Schema migrations**: **Alembic owns all schema changes.** To add a column: edit `models.py`, run `cd backend && alembic revision --autogenerate -m "description"`, review the generated file in `backend/alembic/versions/`, then apply with `alembic upgrade head`. **Never** add columns to a hand-rolled `_run_migrations()` (it no longer exists). `_check_migrations()` in `main.py` warns at startup if the DB is behind the latest migration head.
+- **Rate limiting**: import `limiter` from `backend/limiter.py` and decorate with `@limiter.limit("N/period")` on AI-heavy endpoints. The limiter uses `_client_ip` which reads `X-Forwarded-For` (leftmost IP) so limits apply per real client behind the Caddy proxy — Monte Carlo and red-team endpoints are already rate-limited.
 - **All API helpers** belong in `frontend/src/api/client.js` — don't call axios directly from pages
 - **Vite proxies** `/api` → `http://localhost:8000` in dev — no CORS issues locally
 - **`faction_assignments`** on `GameSession` drives player unit visibility. `ScenarioLibrary.jsx` auto-derives it from `scenario.factions[].role` at session creation (`'AI-controlled'` → `'AI'`, everything else → `'Player'`). `GameSession.jsx` falls back to scenario roles when the array is empty (handles legacy sessions stored with `[]`)
-- **`ai_personality_overrides`** on `GameSession` is a JSON column (faction_id → personality string) added via migration; `RedTeamConsole.jsx` reads/writes it via `PUT /api/red-team/personality`
+- **`ai_personality_overrides`** on `GameSession` is a JSON column (faction_id → personality string); `RedTeamConsole.jsx` reads/writes it via `PUT /api/red-team/personality`
 - **Token logging & cost tracking**: Every Claude call logs its usage to the `TokenUsage` table via `pricing.compute_cost()` which multiplies input/output/cache_write/cache_read tokens by their per-1M rates. New AI functions must call `_log_tokens(function_name, response.usage)` after every Anthropic API call to maintain audit trail and budget visibility
 - **Token efficiency**: Always use `_slim_game_state()` and `_slim_scenario_for_mc()` helpers before serializing game/scenario data to Claude prompts — they reduce token count by stripping non-essential arrays and verbose fields. Check `TokenUsage` table post-deployment to catch unexpected cost spikes
 - **Forecasting overlay** (optional, opt-in per session via `forecasting_enabled`): players assign probabilities to four binary outcomes (`p_blue_wins`, `p_red_wins`, `p_escalation`, `p_key_objective_captured`) *before* adjudication via `POST /api/sessions/{id}/turns/{n}/forecast`. Resolution happens inside `red_team.py`'s `/adjudicate` (NOT advance-turn — that's where scoring lives), wrapped in try/except so it can never break the turn flow. Scoring math lives entirely in pure `forecasting.py`. Brier is the **two-class** form (`mean(2*(p-o)^2)`, range 0–2) — matches the tests and the superforecasting convention; do not "simplify" it to `mean((p-o)^2)`. `resolve_outcomes` needs a real side map: build it from `scenario_obj.factions`, NOT the slim `scenario` dict in `/adjudicate` (which omits `factions`). Surfaces in GameSession (pre-turn panel + inline forecast-vs-outcome + `ForecastingDashboard`), AAR Section 8, and the briefing export. **Briefing export** (`/briefing-export` JSON/Markdown/PDF): `forecasting.build_forecasting_accuracy()` produces the `forecasting_accuracy` block (overall Brier, calibration summary, notable mispredictions = confidently-wrong question-instances with `brier_component>=0.5`, methodology note, `turn_calibration`). The PDF renders a grouped bar chart (`aar._calibration_chart()`, reportlab `VerticalBarChart`: mean estimate vs actual rate per turn) — wrapped in try/except so a chart failure degrades to tables, never breaks the export. Distinct from `build_forecasting_summary()` (AAR §8 + `/forecasting-summary` endpoint), which keeps the per-question turn table.
@@ -95,8 +99,16 @@ cd frontend && npm run dev     # manual
 # Seed DB (run once with venv activated)
 cd backend && python seed_data.py
 
+# Schema migrations (Alembic)
+cd backend && alembic upgrade head                              # apply all pending migrations
+cd backend && alembic revision --autogenerate -m "description" # generate migration after editing models.py
+cd backend && alembic downgrade -1                             # roll back one migration
+
 # API docs
 http://localhost:8000/docs
+
+# Token usage status (per-user daily cap)
+GET /api/me/token-status
 
 # Briefing export endpoints (deterministic, no Claude)
 GET /api/sessions/{id}/briefing-export              # JSON with timeline, turning points, state evolution
@@ -104,7 +116,7 @@ GET /api/sessions/{id}/briefing-export/markdown     # Same as Markdown
 GET /api/sessions/{id}/briefing-export/pdf          # Same as PDF (reportlab)
 ```
 
-Key `.env` vars: `ANTHROPIC_API_KEY`, `CLAUDE_MODEL` (default: `claude-sonnet-4-6`), `SECRET_KEY`, `DATABASE_URL` (default: `sqlite:///./theater.db`), `FRONTEND_URL` (default: `http://localhost:3000`), `TOKEN_BUDGET` (default: 1,000,000 — informational, not enforced automatically)
+Key `.env` vars: `ANTHROPIC_API_KEY`, `CLAUDE_MODEL` (default: `claude-sonnet-4-6`), `SECRET_KEY`, `DATABASE_URL` (default: `sqlite:///./theater.db`), `FRONTEND_URL` (default: `http://localhost:3000`), `TOKEN_BUDGET` (default: 1,000,000 — informational only), `USER_DAILY_TOKEN_LIMIT` (default: 50,000 — enforced by `check_token_budget`), `POSTGRES_PASSWORD` (production only — matches `docker-compose.yml` postgres service)
 
 ---
 
@@ -136,6 +148,10 @@ Common test patterns:
 - **Export/library**: `test_export_library.py` tests session JSON/Markdown export, scenario publishing, cloning, and library search. Auth tokens encode `sub=user.id` (matching production login flow in `routers/auth.py`), not username.
 - **Briefing**: `test_briefing.py` verifies turning-point detection (state delta scoring), timeline assembly, and Markdown/JSON/PDF consistency. Tests use synthetic game states with known pivot points.
 - **Forecasting**: `test_forecasting.py` covers Brier correctness (perfect=0, worst=2, coin-flip≈0.5, clamping, p=0/outcome=1 edge), outcome resolution, calibration thresholds, submission guards (before-adjudication-only/disabled/wrong-turn), AAR Section 8 presence/absence, briefing block, and the `/adjudicate` resolution hook (mocks `ai_client.adjudicate_turn`). Mix of pure-logic and TestClient integration tests.
+- **Session authorization**: `test_session_authz.py` verifies IDOR guards — players can't read/mutate other sessions; admins/GMs can; `list_sessions` filters for non-privileged users.
+- **Admin authorization**: `test_admin_authz.py` verifies that stats, user-list, and session-audit endpoints return 403 for non-admins and 200 for admins.
+- **Token budget + rate limiting**: `test_cost_guard.py` covers budget allow/block/admin-exempt, `/api/me/token-status` response shape, and `_client_ip` X-Forwarded-For parsing (first IP, whitespace, fallback).
+- **Migrations**: `test_migrations.py` runs `alembic upgrade head` against a fresh tmp SQLite DB and asserts all 10 tables exist; runs `downgrade base` and asserts they're all gone; calls `_check_migrations()` on a `create_all()`-only DB and asserts a CRITICAL log is emitted. Postgres integration test is skipped unless `TEST_POSTGRES_URL` env var is set.
 
 ---
 
@@ -150,6 +166,7 @@ Common test patterns:
 | `networkx` | 3.2.1 | 3.3.0+ requires Python 3.10 |
 | `greenlet` | 3.1.1 | 3.2.5 has no cp39-win_amd64 wheel; SQLAlchemy 2.x pulls it in |
 | `bcrypt` | 4.0.1 | 5.0.0 breaks passlib 1.7.4 `verify_password` |
+| `alembic` | 1.13.3 | pinned; pulls in Mako + MarkupSafe as transitive deps |
 | `uvicorn` | — | Use without `[standard]` extras (avoids watchfiles/greenlet compilation) |
 
 - Python 3.10+ union type syntax `X | Y` — add `from __future__ import annotations` to any file using it

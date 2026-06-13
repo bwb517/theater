@@ -8,64 +8,48 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from database import engine, settings, get_db, _is_sqlite
+from database import engine, settings, get_db
 from limiter import limiter
 import models
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("theater")
 
-# Create all tables
+# Create all tables (no-op if they already exist; Alembic owns subsequent schema changes).
 models.Base.metadata.create_all(bind=engine)
 
-# Add columns introduced after initial schema.
-# Each entry maps a table to {column_name: sql_type}. REAL/DOUBLE picks the
-# right floating-point type per backend; everything else is TEXT.
-_MIGRATIONS = {
-    "game_sessions": {
-        "ai_personality_overrides": "TEXT",
-        "previous_game_state": "TEXT",
-        "forecasting_enabled": "BOOLEAN DEFAULT FALSE",
-        "total_brier_score": "REAL" if _is_sqlite else "DOUBLE PRECISION",
-    },
-    "token_usage": {
-        "user_id": "TEXT",
-        "session_id": "TEXT",
-        "total_cost_usd": "REAL" if _is_sqlite else "DOUBLE PRECISION",
-        "claude_model": "TEXT",
-    },
-    "scenarios": {
-        "is_published": "BOOLEAN DEFAULT FALSE",
-        "published_by_user_id": "TEXT",
-        "published_at": "TEXT",
-        "usage_count": "INTEGER DEFAULT 0",
-        "is_official": "BOOLEAN DEFAULT FALSE",
-    },
-}
+_INI_PATH = os.path.join(os.path.abspath(os.path.dirname(__file__)), "alembic.ini")
 
-def _run_migrations():
-    with engine.connect() as conn:
-        for table, cols in _MIGRATIONS.items():
-            if _is_sqlite:
-                # SQLite: use PRAGMA to list existing columns
-                result = conn.execute(text(f"PRAGMA table_info({table})"))
-                existing = {row[1] for row in result}
-                for col, col_type in cols.items():
-                    if col not in existing:
-                        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
-                        conn.commit()
-            else:
-                # PostgreSQL: use information_schema to check column existence
-                for col, col_type in cols.items():
-                    result = conn.execute(text(
-                        "SELECT 1 FROM information_schema.columns "
-                        "WHERE table_name = :table AND column_name = :col"
-                    ), {"table": table, "col": col})
-                    if not result.fetchone():
-                        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
-                        conn.commit()
 
-_run_migrations()
+def _check_migrations(engine_=None, ini_path_=None):
+    """Warn loudly at startup if unapplied Alembic migrations exist."""
+    from alembic.config import Config
+    from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+    _engine = engine_ or engine
+    _ini = ini_path_ or _INI_PATH
+    try:
+        cfg = Config(_ini)
+        scripts = ScriptDirectory.from_config(cfg)
+        with _engine.connect() as conn:
+            ctx = MigrationContext.configure(conn)
+            current = set(ctx.get_current_heads())
+        head = set(scripts.get_heads())
+        if current != head:
+            log.critical(
+                "Unapplied database migrations detected (current=%s head=%s). "
+                "Run: cd backend && alembic upgrade head",
+                current, head,
+            )
+    except Exception as exc:
+        log.warning("Migration check failed: %s", exc)
+
+
+# Skip the migration check when running under pytest — the test DB is managed
+# by create_all() in conftest.py, not Alembic, so the check would always warn.
+import sys as _sys
+if "pytest" not in _sys.modules:
+    _check_migrations()
 
 _INSECURE_KEYS = {
     "theater-dev-secret-change-in-production",
@@ -102,6 +86,7 @@ app.add_middleware(
 
 # Register routers
 from routers import auth, scenarios, sessions, red_team, monte_carlo, aar, admin, export
+from cost_guard import me_router
 
 app.include_router(auth.router)
 app.include_router(scenarios.router)
@@ -111,6 +96,7 @@ app.include_router(monte_carlo.router)
 app.include_router(aar.router)
 app.include_router(admin.router)
 app.include_router(export.router)
+app.include_router(me_router)
 
 @app.get("/health")
 def health(db: Session = Depends(get_db)):

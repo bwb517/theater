@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from database import get_db
 from auth import get_current_user
+from cost_guard import check_token_budget
 from limiter import limiter
 import models
 import ai_client
@@ -65,7 +66,7 @@ def serialize_scenario(s: models.Scenario) -> dict:
 
 @router.post("/generate")
 @limiter.limit("10/hour")
-async def generate_scenario(request: Request, req: GenerateRequest, user=Depends(get_current_user)):
+async def generate_scenario(request: Request, req: GenerateRequest, user=Depends(check_token_budget)):
     """Generate a scenario from natural language using Claude."""
     try:
         scenario_data = await ai_client.generate_scenario(

@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from typing import Optional
 from database import get_db
 from auth import get_optional_user, get_current_user
+from cost_guard import check_token_budget
 from limiter import limiter
 import models
 import ai_client
@@ -46,7 +47,8 @@ async def generate_aar(
     session_id: str,
     req: AARRequest,
     db: Session = Depends(get_db),
-    user=Depends(get_optional_user)
+    user=Depends(get_optional_user),
+    _: models.User = Depends(check_token_budget),
 ):
     """Generate a complete After Action Review for a session."""
     session = db.query(models.GameSession).filter(models.GameSession.id == session_id).first()

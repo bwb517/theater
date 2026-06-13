@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from database import get_db
 from auth import get_optional_user
+from cost_guard import check_token_budget
 from limiter import limiter
 import models
 import ai_client
@@ -23,7 +24,8 @@ async def run_monte_carlo(
     request: Request,
     req: MonteCarloRequest,
     db: Session = Depends(get_db),
-    user=Depends(get_optional_user)
+    user=Depends(get_optional_user),
+    _: models.User = Depends(check_token_budget),
 ):
     """Run Monte Carlo probability analysis on a scenario or active session."""
     scenario_obj = None

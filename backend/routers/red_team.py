@@ -5,6 +5,8 @@ from pydantic import BaseModel
 from database import get_db
 from auth import get_current_user, get_optional_user, require_role
 from limiter import limiter
+from permissions import require_session_access
+from cost_guard import check_token_budget
 from game_consts import haversine_km
 import models
 import ai_client
@@ -31,26 +33,6 @@ class AIPersonalityUpdate(BaseModel):
     faction_id: str
     personality: str
 
-def _require_session_access(user: models.User, session: models.GameSession):
-    """Admin and game_master always allowed; player allowed if they created the session,
-    if the session has no explicit user_id assignments (open/demo mode), or if their
-    user_id appears in faction_assignments."""
-    if user.role in ("admin", "game_master"):
-        return
-    # Session creator is always allowed
-    if session.created_by and str(session.created_by) == str(user.id):
-        return
-    # faction_assignments is a JSON list of {"faction_id": ..., "user_id": ..., "type": ...}
-    assignments = json.loads(session.faction_assignments or "[]")
-    named = [a for a in assignments if isinstance(a, dict) and a.get("user_id")]
-    # If no assignment carries a user_id the session is open to any authenticated user
-    # (covers demo sessions and solo-play sessions created without explicit player assignment)
-    if not named:
-        return
-    user_id_str = str(user.id)
-    if not any(str(a["user_id"]) == user_id_str for a in named):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-
 @router.post("/{session_id}/red-team")
 @limiter.limit("20/hour")
 async def generate_red_team_moves(
@@ -58,13 +40,13 @@ async def generate_red_team_moves(
     session_id: str,
     req: RedTeamRequest,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user)
+    user=Depends(check_token_budget)
 ):
     """Generate AI adversary moves for a faction this turn."""
     session = db.query(models.GameSession).filter(models.GameSession.id == session_id).first()
     if not session:
         raise HTTPException(404, "Session not found")
-    _require_session_access(user, session)
+    require_session_access(user, session)
 
     scenario_obj = db.query(models.Scenario).filter(models.Scenario.id == session.scenario_id).first()
     if not scenario_obj:
@@ -180,13 +162,13 @@ async def adjudicate_turn(
     session_id: str,
     req: AdjudicateRequest,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user)
+    user=Depends(check_token_budget)
 ):
     """Run AI adjudication for the current turn."""
     session = db.query(models.GameSession).filter(models.GameSession.id == session_id).first()
     if not session:
         raise HTTPException(404, "Session not found")
-    _require_session_access(user, session)
+    require_session_access(user, session)
 
     # Always adjudicate the actual current turn — ignore client-supplied turn_number
     turn_number = session.current_turn
