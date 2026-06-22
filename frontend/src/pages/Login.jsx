@@ -116,10 +116,29 @@ export default function Login() {
                   value={creds.password}
                   onChange={e => setCreds(p => ({ ...p, password: e.target.value }))}
                   className="w-full bg-theater-bg border border-theater-border rounded px-10 py-2.5 text-theater-text text-sm focus:outline-none focus:border-theater-accent transition-colors"
-                  placeholder={mode === 'register' ? 'Min 8 characters' : 'Enter password'}
+                  placeholder={mode === 'register' ? 'Min 10 characters' : 'Enter password'}
                   required
                 />
               </div>
+              {mode === 'register' && creds.password.length > 0 && (() => {
+                const p = creds.password
+                const reqs = [
+                  { label: '10+ characters',    met: p.length >= 10 },
+                  { label: 'Uppercase letter',  met: /[A-Z]/.test(p) },
+                  { label: 'Lowercase letter',  met: /[a-z]/.test(p) },
+                  { label: 'Number',            met: /\d/.test(p) },
+                  { label: 'Special character', met: /[^A-Za-z0-9]/.test(p) },
+                ]
+                return (
+                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                    {reqs.map(({ label, met }) => (
+                      <span key={label} className={`text-xs flex items-center gap-1 ${met ? 'text-theater-green' : 'text-theater-muted'}`}>
+                        {met ? '✓' : '○'} {label}
+                      </span>
+                    ))}
+                  </div>
+                )
+              })()}
             </div>
 
             {error && (

@@ -84,6 +84,17 @@ function AutoFitBounds({ units }) {
   return null
 }
 
+// Calls invalidateSize() whenever the map container is resized (e.g. side panel open/close)
+function MapResizer() {
+  const map = useMap()
+  useEffect(() => {
+    const observer = new ResizeObserver(() => map.invalidateSize())
+    observer.observe(map.getContainer())
+    return () => observer.disconnect()
+  }, [map])
+  return null
+}
+
 // Handles map clicks (pick mode) and right-clicks (context menu)
 function MapEventHandler({ enabled, onMapClick, onMapRightClick }) {
   useMapEvents({
@@ -226,6 +237,7 @@ export default function OperationalMap({
         />
 
         <AutoFitBounds units={validUnits} />
+        <MapResizer />
         <MapEventHandler enabled={pickingDestination} onMapClick={onMapClick} onMapRightClick={onMapRightClick} />
 
         {/* Movement arrows (pending maneuver orders with map destinations) */}

@@ -8,7 +8,7 @@ import OrdersForm, { blankOrder } from '../components/OrdersForm'
 import TurnDiffPanel from '../components/TurnDiffPanel'
 import PreTurnForecastPanel from '../components/PreTurnForecastPanel'
 import ForecastingDashboard from '../components/ForecastingDashboard'
-import { Map, Send, ScrollText, Eye, Trophy, ChevronDown, AlertCircle, Zap, SkipForward, X, Trash2, RotateCcw, Flag, Navigation, Target } from 'lucide-react'
+import { Map, Send, ScrollText, Eye, Trophy, ChevronDown, ChevronLeft, ChevronRight, AlertCircle, Zap, SkipForward, X, Trash2, RotateCcw, Flag, Navigation, Target } from 'lucide-react'
 
 // Derive current turn workflow phase from session state
 function derivePhase(session) {
@@ -34,6 +34,9 @@ const TABS = [
   { id: 'intel', label: 'Intel', icon: Eye },
   { id: 'scores', label: 'Scores', icon: Trophy },
 ]
+
+// Side-panel tabs — the map is now the always-on focal surface, not a tab.
+const PANEL_TABS = TABS.filter(t => t.id !== 'map')
 
 function AuditBlock({ title, content, isText = false, softLimit = null }) {
   const [showFull, setShowFull] = useState(false)
@@ -279,7 +282,8 @@ export default function GameSession() {
   const [session, setSession] = useState(null)
   const [scenario, setScenario] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('map')
+  const [activeTab, setActiveTab] = useState('moves')
+  const [panelOpen, setPanelOpen] = useState(true)
   const [aiGenerating, setAiGenerating] = useState(false)
   const [adjudicating, setAdjudicating] = useState(false)
   const [error, setError] = useState('')
@@ -480,6 +484,7 @@ export default function GameSession() {
       setPickingDest(false)
       setPickingOrderId(null)
       setActiveTab('moves')
+      setPanelOpen(true)
     } else if (pickingFiresTarget && pickingFiresOrderId) {
       const label = `${lat.toFixed(4)}°N, ${lng.toFixed(4)}°E`
       setPendingOrders(prev => prev.map(o =>
@@ -488,6 +493,7 @@ export default function GameSession() {
       setPickingFiresTarget(false)
       setPickingFiresOrderId(null)
       setActiveTab('moves')
+      setPanelOpen(true)
     }
   }, [pickingDest, pickingOrderId, pickingFiresTarget, pickingFiresOrderId])
 
@@ -568,31 +574,37 @@ export default function GameSession() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div>
-              <h2 className="text-theater-text font-semibold font-mono">{session.title}</h2>
+              <h2 className="text-theater-text font-semibold">{session.title}</h2>
               <div className="flex items-center gap-3 mt-0.5">
                 <StatusBadge status={session.status} />
                 <span className="text-theater-muted text-xs font-mono">
-                  Turn {session.current_turn} / {session.max_turns}
+                  T{session.current_turn}/{session.max_turns} · {session.time_per_turn_hours}h
                 </span>
-                <span className="text-theater-muted text-xs font-mono">
-                  {session.time_per_turn_hours}hr increments
-                </span>
+                {(() => {
+                  const phase = PHASE_META[turnPhase] || PHASE_META.player
+                  return (
+                    <span className={`hidden lg:inline-flex items-center text-xs px-2.5 py-0.5 rounded-full border font-medium ${phase.color}`} title={phase.sub}>
+                      {phase.label}
+                    </span>
+                  )
+                })()}
               </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {session.status === 'Active' && (
-              <button
-                onClick={() => setShowCapitulateConfirm(true)}
-                className="flex items-center gap-1.5 text-orange-400 text-xs font-mono border border-orange-400/30 hover:bg-orange-400/10 px-3 py-1.5 rounded transition-all"
-                title="Declare defeat and end the session"
-              >
-                <Flag className="w-3.5 h-3.5" />
-                CAPITULATE
-              </button>
-            )}
-            <button onClick={() => navigate(`/sessions/${id}/red-team`)} className="text-theater-red text-xs font-mono border border-theater-red/30 hover:bg-theater-red/10 px-3 py-1.5 rounded transition-all">
-              Red Team Console
+            <button
+              onClick={handleRunAI}
+              disabled={aiGenerating || adjudicating}
+              className="flex items-center gap-1.5 border border-theater-red/40 hover:bg-theater-red/10 text-theater-red px-3 py-1.5 rounded text-xs font-semibold transition-all disabled:opacity-40"
+            >
+              <Zap className="w-3.5 h-3.5" /> Run AI
+            </button>
+            <button
+              onClick={handleAdjudicate}
+              disabled={session.status === 'Complete' || aiGenerating || adjudicating}
+              className="flex items-center gap-1.5 border border-theater-green/40 hover:bg-theater-green/10 text-theater-green px-3 py-1.5 rounded text-xs font-semibold transition-all disabled:opacity-40"
+            >
+              <SkipForward className="w-3.5 h-3.5" /> Adjudicate
             </button>
             <div className="relative" onClick={e => e.stopPropagation()}>
               <button
@@ -604,6 +616,21 @@ export default function GameSession() {
               </button>
               {showSessionMenu && (
                 <div className="absolute right-0 top-full mt-1 z-[2000] bg-theater-card border border-theater-border rounded-lg shadow-xl overflow-hidden min-w-44">
+                  <button
+                    onClick={() => { navigate(`/sessions/${id}/red-team`); setShowSessionMenu(false) }}
+                    className="w-full text-left px-4 py-2.5 text-theater-red text-xs font-mono hover:bg-theater-bg transition-colors flex items-center gap-2"
+                  >
+                    <Zap className="w-3 h-3" /> Red Team
+                  </button>
+                  {session.status === 'Active' && (
+                    <button
+                      onClick={() => { setShowCapitulateConfirm(true); setShowSessionMenu(false) }}
+                      className="w-full text-left px-4 py-2.5 text-orange-500 text-xs font-mono hover:bg-theater-bg transition-colors flex items-center gap-2"
+                    >
+                      <Flag className="w-3 h-3" /> Capitulate
+                    </button>
+                  )}
+                  <div className="border-t border-theater-border" />
                   <button
                     onClick={() => { navigate(`/sessions/${id}/monte-carlo`); setShowSessionMenu(false) }}
                     className="w-full text-left px-4 py-2.5 text-theater-gray text-xs font-mono hover:bg-theater-bg transition-colors"
@@ -622,9 +649,10 @@ export default function GameSession() {
                   >
                     Briefing Export
                   </button>
+                  <div className="border-t border-theater-border" />
                   <button
                     onClick={() => { handleDelete(); setShowSessionMenu(false) }}
-                    className="w-full text-left px-4 py-2.5 text-theater-red text-xs font-mono hover:bg-theater-bg border-t border-theater-border transition-colors flex items-center gap-2"
+                    className="w-full text-left px-4 py-2.5 text-theater-red text-xs font-mono hover:bg-theater-bg transition-colors flex items-center gap-2"
                   >
                     <Trash2 className="w-3 h-3" /> Delete Session
                   </button>
@@ -634,68 +662,46 @@ export default function GameSession() {
           </div>
         </div>
 
-        {/* Turn progress bar */}
-        <div className="mt-3">
-          <div className="flex gap-1">
-            {Array.from({ length: session.max_turns }).map((_, i) => {
-              const turnNum = i + 1
-              const done = turnNum < session.current_turn
-              const current = turnNum === session.current_turn
-              return (
-                <div
-                  key={i}
-                  className={`flex-1 h-1 rounded-full transition-all ${
-                    done ? 'bg-theater-accent' : current ? 'bg-theater-accent-light pulse-blue' : 'bg-theater-border'
-                  }`}
-                />
-              )
-            })}
-          </div>
-          <div className="flex justify-between mt-1">
-            <span className="text-theater-muted text-xs font-mono">H+00:00</span>
-            <span className="text-theater-accent-light text-xs font-mono">
-              H+{(session.current_turn - 1) * session.time_per_turn_hours}:00 (CURRENT)
-            </span>
-            <span className="text-theater-muted text-xs font-mono">
-              H+{session.max_turns * session.time_per_turn_hours}:00
-            </span>
-          </div>
+        {/* Thin turn progress strip */}
+        <div
+          className="flex gap-0.5 mt-2"
+          title={`H+${(session.current_turn - 1) * session.time_per_turn_hours}:00 of H+${session.max_turns * session.time_per_turn_hours}:00`}
+        >
+          {Array.from({ length: session.max_turns }).map((_, i) => {
+            const turnNum = i + 1
+            const done = turnNum < session.current_turn
+            const current = turnNum === session.current_turn
+            return (
+              <div
+                key={i}
+                className={`flex-1 h-1 rounded-full transition-all ${
+                  done ? 'bg-theater-accent' : current ? 'bg-theater-accent-light pulse-blue' : 'bg-theater-border'
+                }`}
+              />
+            )
+          })}
         </div>
       </div>
 
-      {/* Turn phase banner */}
-      {(() => {
-        const phase = PHASE_META[turnPhase] || PHASE_META.player
-        return (
-          <div className={`flex-shrink-0 border-b px-4 py-2 flex items-center justify-between ${phase.color}`}>
-            <div className="flex items-center gap-3">
-              <span className="font-mono font-bold text-xs tracking-widest">{phase.label}</span>
-              <span className="text-xs opacity-70 hidden md:block">{phase.sub}</span>
-            </div>
-            <span className="font-mono text-xs opacity-50">Turn {session.current_turn}/{session.max_turns}</span>
-          </div>
-        )
-      })()}
-
-      {/* AI controls */}
-      <div className="flex-shrink-0 bg-theater-bg border-b border-theater-border px-4 py-2 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      {/* Slim status strip — only appears while the AI is working or there's a message */}
+      {(aiGenerating || adjudicating || (redAIDone && !adjudicating && !aiGenerating) || (error && !aiGenerating && !adjudicating)) && (
+        <div className="flex-shrink-0 bg-theater-bg border-b border-theater-border px-4 py-1.5">
           {aiGenerating && (
             <div className="flex items-center gap-2 text-theater-red text-xs font-mono">
               <span className="inline-block w-2 h-2 rounded-full bg-theater-red animate-pulse" />
-              RED TEAM AI GENERATING ADVERSARY MOVES...
+              Red Team AI generating adversary moves…
             </div>
           )}
           {adjudicating && (
             <div className="flex items-center gap-2 text-theater-green text-xs font-mono">
               <span className="inline-block w-2 h-2 rounded-full bg-theater-green animate-pulse" />
-              ADJUDICATION ENGINE RESOLVING TURN...
+              Adjudication engine resolving turn…
             </div>
           )}
           {redAIDone && !adjudicating && !aiGenerating && (
             <div className="flex items-center gap-2 text-theater-green text-xs font-mono">
               <span className="inline-block w-2 h-2 rounded-full bg-theater-green" />
-              RED FORCE ORDERS COMPLETE — READY TO ADJUDICATE
+              Red force orders complete — ready to adjudicate
               <button onClick={() => setRedAIDone(false)} className="ml-1 text-theater-muted hover:text-theater-text">
                 <X className="w-3 h-3" />
               </button>
@@ -708,48 +714,12 @@ export default function GameSession() {
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleRunAI}
-            disabled={aiGenerating || adjudicating}
-            className="flex items-center gap-2 border border-theater-red/40 hover:bg-theater-red/10 text-theater-red px-4 py-1.5 rounded text-xs font-mono font-semibold transition-all disabled:opacity-40"
-          >
-            <Zap className="w-3.5 h-3.5" />
-            RUN AI ADVERSARY
-          </button>
-          <button
-            onClick={handleAdjudicate}
-            disabled={session.status === 'Complete' || aiGenerating || adjudicating}
-            className="flex items-center gap-2 border border-theater-green/40 hover:bg-theater-green/10 text-theater-green px-4 py-1.5 rounded text-xs font-mono font-semibold transition-all disabled:opacity-40"
-          >
-            <SkipForward className="w-3.5 h-3.5" />
-            ADJUDICATE & ADVANCE
-          </button>
-        </div>
-      </div>
+      )}
 
-      {/* Tabs */}
-      <div className="flex-shrink-0 flex border-b border-theater-border bg-theater-card">
-        {TABS.map(({ id: tid, label, icon: Icon }) => (
-          <button
-            key={tid}
-            onClick={() => setActiveTab(tid)}
-            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-mono font-semibold border-b-2 transition-all ${
-              activeTab === tid
-                ? 'border-theater-accent-light text-theater-accent-light'
-                : 'border-transparent text-theater-muted hover:text-theater-gray'
-            }`}
-          >
-            <Icon className="w-3.5 h-3.5" />
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* Tab content */}
-      <div className="flex-1 overflow-hidden">
+      {/* Body: the map is the focal surface; tabs live in a collapsible side panel */}
+      <div className="flex-1 flex overflow-hidden">
         {/* Map always stays mounted so Leaflet zoom/pan state is preserved */}
-        <div className={`relative h-full ${activeTab !== 'map' ? 'hidden' : ''}`}>
+        <div className="relative flex-1 min-w-0">
             <OperationalMap
               units={units.map(u => ({ ...u, location: u.location || {} }))}
               factions={factions}
@@ -871,10 +841,52 @@ export default function GameSession() {
                 </button>
               </div>
             )}
+
+            {/* Reopen handle — shown when the side panel is collapsed */}
+            {!panelOpen && (
+              <button
+                onClick={() => setPanelOpen(true)}
+                className="absolute top-1/2 right-0 -translate-y-1/2 z-[1001] bg-theater-card/95 border border-theater-border border-r-0 rounded-l-md w-5 h-14 flex items-center justify-center text-theater-muted hover:text-theater-text shadow-md"
+                title="Open panel"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+            )}
           </div>
 
-        {activeTab === 'moves' && (
-          <div className="h-full overflow-y-auto">
+        {/* Collapsible side panel — Moves / Turn Log / Intel / Scores */}
+        {panelOpen && (
+        <div className="flex-shrink-0 w-[380px] border-l border-theater-border bg-theater-bg flex flex-col">
+          <div className="flex-shrink-0 flex items-center gap-2 border-b border-theater-border bg-theater-card px-2 py-1.5">
+            <div className="flex-1 grid grid-cols-4 gap-1">
+              {PANEL_TABS.map(({ id: tid, label, icon: Icon }) => {
+                const active = activeTab === tid || (tid === 'moves' && activeTab === 'map')
+                return (
+                  <button
+                    key={tid}
+                    onClick={() => setActiveTab(tid)}
+                    className={`flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs rounded transition-all ${
+                      active ? 'bg-theater-accent text-white' : 'text-theater-muted hover:text-theater-gray hover:bg-theater-border'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+                    <span className="hidden xl:inline">{label}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <button
+              onClick={() => setPanelOpen(false)}
+              className="text-theater-muted hover:text-theater-text p-1 flex-shrink-0"
+              title="Collapse panel"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto">
+        {(activeTab === 'moves' || activeTab === 'map') && (
+          <div>
             {session.forecasting_enabled && turnPhase === 'player' && (
               <PreTurnForecastPanel
                 session={session}
@@ -911,7 +923,7 @@ export default function GameSession() {
         )}
 
         {activeTab === 'log' && (
-          <div className="h-full overflow-y-auto p-4 space-y-3">
+          <div className="p-4 space-y-3">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-theater-text font-mono font-semibold">Turn Log ({turns.length} turns)</h3>
               <button
@@ -966,7 +978,7 @@ export default function GameSession() {
           const triggeredInjects = (scenario?.injects || []).filter(inj => inj.turn_trigger <= session.current_turn)
 
           return (
-            <div className="h-full overflow-y-auto p-4 space-y-4">
+            <div className="p-4 space-y-4">
               <div className="bg-theater-card border border-theater-border rounded-lg p-4">
                 <h3 className="text-theater-blue font-mono font-semibold mb-4 flex items-center gap-2">
                   <Eye className="w-4 h-4" /> Intelligence Picture — Turn {session.current_turn}
@@ -1063,28 +1075,28 @@ export default function GameSession() {
         })()}
 
         {activeTab === 'scores' && (
-          <div className="h-full overflow-y-auto p-4 space-y-4">
+          <div className="p-4 space-y-4">
             <h3 className="text-theater-text font-mono font-semibold">Scores & Objectives — Turn {session.current_turn}</h3>
 
             {session.forecasting_enabled && <ForecastingDashboard summary={forecastSummary} />}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-2">
               {scores.map(fs => (
-                <div key={fs.faction_id} className={`bg-theater-card border rounded-lg p-4 ${
+                <div key={fs.faction_id} className={`bg-theater-card border rounded-lg px-3 py-2.5 ${
                   fs.side === 'Blue' ? 'border-theater-blue/30' : fs.side === 'Red' ? 'border-theater-red/30' : 'border-theater-border'
                 }`}>
-                  <div className="flex items-center justify-between mb-3">
-                    <div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 min-w-0">
                       <SideChip side={fs.side} />
-                      <p className="text-theater-text text-sm font-semibold mt-1">{fs.name}</p>
+                      <p className="text-theater-text text-xs font-medium truncate">{fs.name}</p>
                     </div>
-                    <div className="text-right">
-                      <p className="text-3xl font-bold font-mono text-theater-text">{fs.score}</p>
-                      <p className="text-theater-muted text-xs font-mono">POINTS</p>
+                    <div className="text-right flex-shrink-0 ml-3">
+                      <span className="text-xl font-bold font-mono text-theater-text">{fs.score}</span>
+                      <span className="text-theater-muted text-xs font-mono ml-1">pts</span>
                     </div>
                   </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-theater-muted font-mono">OBJECTIVE STATUS</span>
+                  <div className="flex items-center justify-between text-xs mt-1.5">
+                    <span className="text-theater-muted">Objective status</span>
                     <span className={`font-mono ${fs.score > 50 ? 'text-theater-green' : fs.score > 25 ? 'text-yellow-700' : 'text-theater-red'}`}>
                       {fs.objective_status}
                     </span>
@@ -1093,85 +1105,66 @@ export default function GameSession() {
               ))}
             </div>
 
-            {/* Unit status table */}
+            {/* Unit status cards */}
             <div className="bg-theater-card border border-theater-border rounded-lg overflow-hidden">
               <div className="px-4 py-3 border-b border-theater-border">
-                <h4 className="text-theater-text font-mono text-sm font-semibold">UNIT STATUS</h4>
+                <h4 className="text-theater-text text-sm font-semibold">Unit status</h4>
               </div>
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-theater-border">
-                    <th className="text-left px-4 py-2 text-theater-muted font-mono">UNIT</th>
-                    <th className="text-left px-4 py-2 text-theater-muted font-mono">FACTION</th>
-                    <th className="text-left px-4 py-2 text-theater-muted font-mono">STRENGTH</th>
-                    <th className="text-left px-4 py-2 text-theater-muted font-mono">SUPPLY</th>
-                    <th className="text-left px-4 py-2 text-theater-muted font-mono">MAN</th>
-                    <th className="text-left px-4 py-2 text-theater-muted font-mono">WTF</th>
-                    <th className="text-left px-4 py-2 text-theater-muted font-mono">C2</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {units.map(u => {
-                    const fac = factions.find(f => f.faction_id === u.faction_id)
-                    const supply = u.supply || {}
-                    const munitions = supply.munitions
-                    const wtfColors = { High: 'text-theater-green', Moderate: 'text-yellow-600', Low: 'text-orange-500', Broken: 'text-theater-red' }
-                    const c2Colors  = { Nominal: 'text-theater-green', Degraded: 'text-yellow-600', Lost: 'text-theater-red' }
-                    return (
-                      <tr key={u.unit_id} className={`border-b border-theater-border/40 ${u.strength === 'Destroyed' ? 'opacity-40' : ''}`}>
-                        <td className="px-4 py-2">
-                          <div className="font-mono text-theater-muted">{u.unit_id}</div>
-                          <div className="text-theater-gray">{u.name}</div>
-                          {u.strength === 'Destroyed' && <div className="text-theater-red font-mono text-xs">DESTROYED</div>}
-                        </td>
-                        <td className="px-4 py-2">
-                          {fac && <SideChip side={fac.side} />}
-                        </td>
-                        <td className="px-4 py-2 w-32">
-                          <StrengthBar strength={u.strength} />
-                        </td>
-                        <td className="px-4 py-2">
-                          {supply.ammo != null ? (
-                            <div className="space-y-0.5 font-mono">
-                              {munitions != null ? (
-                                <div className={munitions.count === 0 ? 'text-theater-red' : 'text-theater-gray'}>
-                                  MUN {munitions.count}/{munitions.max}
-                                </div>
-                              ) : (
-                                <div className={supply.ammo < 20 ? 'text-theater-red' : 'text-theater-gray'}>AMO {supply.ammo}</div>
-                              )}
-                              <div className={supply.fuel < 20 ? 'text-theater-red' : 'text-theater-gray'}>FUEL {supply.fuel}</div>
-                            </div>
-                          ) : (
-                            <span className="text-theater-muted">—</span>
+              <div className="divide-y divide-theater-border/40">
+                {units.map(u => {
+                  const fac = factions.find(f => f.faction_id === u.faction_id)
+                  const supply = u.supply || {}
+                  const munitions = supply.munitions
+                  const destroyed = u.strength === 'Destroyed'
+                  const wtfColors = { High: 'text-theater-green', Moderate: 'text-yellow-600', Low: 'text-orange-500', Broken: 'text-theater-red' }
+                  const c2Colors  = { Nominal: 'text-theater-green', Degraded: 'text-yellow-600', Lost: 'text-theater-red' }
+                  return (
+                    <div key={u.unit_id} className={`px-3 py-2.5 ${destroyed ? 'opacity-40' : ''}`}>
+                      {/* Row 1: side chip + unit id/name + strength */}
+                      <div className="flex items-center gap-2 mb-1.5">
+                        {fac && <SideChip side={fac.side} />}
+                        <div className="flex-1 min-w-0">
+                          <span className="font-mono text-theater-muted text-xs">{u.unit_id}</span>
+                          <span className="text-theater-gray text-xs ml-1.5 truncate">{u.name}</span>
+                        </div>
+                        {destroyed
+                          ? <span className="text-theater-red font-mono text-xs flex-shrink-0">DESTROYED</span>
+                          : <StrengthBar strength={u.strength} />
+                        }
+                      </div>
+                      {/* Row 2: supply · manning · WTF · C2 */}
+                      {!destroyed && (
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs font-mono">
+                          {supply.ammo != null && (
+                            <>
+                              {munitions != null
+                                ? <span className={munitions.count === 0 ? 'text-theater-red' : 'text-theater-muted'}>MUN {munitions.count}/{munitions.max}</span>
+                                : <span className={supply.ammo < 20 ? 'text-theater-red' : 'text-theater-muted'}>AMO {supply.ammo}</span>
+                              }
+                              <span className={supply.fuel < 20 ? 'text-theater-red' : 'text-theater-muted'}>FUEL {supply.fuel}</span>
+                            </>
                           )}
-                        </td>
-                        <td className="px-4 py-2">
-                          {u.manning != null ? (
-                            <span className={`font-mono ${u.manning < 30 ? 'text-theater-red' : u.manning < 60 ? 'text-yellow-600' : 'text-theater-green'}`}>
-                              {u.manning}%
+                          {u.manning != null && (
+                            <span className={u.manning < 30 ? 'text-theater-red' : u.manning < 60 ? 'text-yellow-600' : 'text-theater-muted'}>
+                              MAN {u.manning}%
                             </span>
-                          ) : <span className="text-theater-muted">—</span>}
-                        </td>
-                        <td className="px-4 py-2">
-                          {u.will_to_fight ? (
-                            <span className={`font-mono font-semibold ${wtfColors[u.will_to_fight] || 'text-theater-gray'}`}>
-                              {u.will_to_fight}
+                          )}
+                          {u.will_to_fight && (
+                            <span className={wtfColors[u.will_to_fight] || 'text-theater-gray'}>
+                              WTF: {u.will_to_fight}
                             </span>
-                          ) : <span className="text-theater-muted">—</span>}
-                        </td>
-                        <td className="px-4 py-2">
-                          {u.c2_status ? (
-                            <span className={`font-mono ${c2Colors[u.c2_status] || 'text-theater-gray'}`}>
-                              {u.c2_status}
+                          )}
+                          {u.c2_status && (
+                            <span className={c2Colors[u.c2_status] || 'text-theater-gray'}>
+                              C2: {u.c2_status}
                             </span>
-                          ) : <span className="text-theater-muted">—</span>}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
             </div>
 
             {/* Logistics impacts */}
@@ -1206,6 +1199,9 @@ export default function GameSession() {
               </div>
             )}
           </div>
+        )}
+          </div>
+        </div>
         )}
       </div>
 

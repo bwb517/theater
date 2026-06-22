@@ -64,15 +64,15 @@ function ScenarioCard({ scenario, onLaunch, onClone, onEdit, onPublish, onExport
         <div className="flex gap-2 pt-3 border-t border-theater-border flex-wrap">
           <button
             onClick={() => onLaunch(scenario)}
-            className="flex-1 flex items-center justify-center gap-1.5 bg-theater-accent/10 hover:bg-theater-accent/20 text-theater-accent-light border border-theater-accent/30 rounded py-1.5 text-xs font-mono font-semibold transition-all"
+            className="flex-1 flex items-center justify-center gap-1.5 bg-theater-accent/10 hover:bg-theater-accent/20 text-theater-accent-light border border-theater-accent/30 rounded py-1.5 text-xs font-semibold transition-all"
           >
             <Play className="w-3 h-3" /> Launch
           </button>
           <button
             onClick={() => onEdit(scenario)}
-            className="flex items-center justify-center gap-1.5 px-3 border border-theater-border hover:border-theater-accent/30 rounded py-1.5 text-xs font-mono text-theater-gray hover:text-theater-text transition-all"
+            className="flex items-center justify-center gap-1.5 px-3 border border-theater-border hover:border-theater-accent/30 rounded py-1.5 text-xs text-theater-gray hover:text-theater-text transition-all"
           >
-            EDIT
+            Edit
           </button>
           <button
             onClick={() => onClone(scenario)}
@@ -108,7 +108,6 @@ function MyScenarios({ userRole }) {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('All')
-  const [forecastingEnabled, setForecastingEnabled] = useState(false)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -136,7 +135,7 @@ function MyScenarios({ userRole }) {
         max_turns: wc.duration_turns || 8,
         time_per_turn_hours: 9,
         faction_assignments,
-        forecasting_enabled: forecastingEnabled,
+        forecasting_enabled: localStorage.getItem('theater_forecasting_default') === 'true',
       })
       navigate(`/sessions/${res.data.id}`)
     } catch (e) {
@@ -194,34 +193,23 @@ function MyScenarios({ userRole }) {
             <button
               key={t}
               onClick={() => setTypeFilter(t)}
-              className={`px-3 py-2 rounded text-xs font-mono border transition-all ${
+              className={`px-3 py-2 rounded text-xs border transition-all ${
                 typeFilter === t
                   ? 'bg-theater-accent/20 text-theater-accent-light border-theater-accent/40'
                   : 'text-theater-gray border-theater-border hover:border-theater-accent/30 hover:text-theater-text'
               }`}
             >
-              {t.toUpperCase()}
+              {t}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Optional analytic overlay applied to sessions launched from here */}
-      <label className="flex items-center gap-2 mb-6 text-xs font-mono text-theater-gray cursor-pointer select-none">
-        <input
-          type="checkbox"
-          checked={forecastingEnabled}
-          onChange={e => setForecastingEnabled(e.target.checked)}
-          className="accent-theater-accent"
-        />
-        Enable forecasting (track your prediction accuracy) for new sessions
-      </label>
-
       {typeFilter === 'All' && (
         <div className="mb-6">
-          <h2 className="text-theater-gray text-xs font-mono tracking-widest mb-3 flex items-center gap-2">
+          <h2 className="text-theater-gray text-xs font-medium tracking-wide mb-3 flex items-center gap-2">
             <span className="h-px flex-1 bg-theater-border" />
-            Official Templates ({filtered.filter(s => s.is_template).length})
+            Official templates ({filtered.filter(s => s.is_template).length})
             <span className="h-px flex-1 bg-theater-border" />
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -238,9 +226,9 @@ function MyScenarios({ userRole }) {
 
       {filtered.filter(s => !s.is_template).length > 0 && (
         <div>
-          <h2 className="text-theater-gray text-xs font-mono tracking-widest mb-3 flex items-center gap-2">
+          <h2 className="text-theater-gray text-xs font-medium tracking-wide mb-3 flex items-center gap-2">
             <span className="h-px flex-1 bg-theater-border" />
-            Custom Scenarios ({filtered.filter(s => !s.is_template).length})
+            Custom scenarios ({filtered.filter(s => !s.is_template).length})
             <span className="h-px flex-1 bg-theater-border" />
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -380,7 +368,6 @@ function PublicLibrary() {
   const [sort, setSort] = useState('usage_count')
   const [page, setPage] = useState(1)
   const [cloning, setCloning] = useState(null)
-  const [forecastingEnabled, setForecastingEnabled] = useState(false)
   const navigate = useNavigate()
   const LIMIT = 18
 
@@ -410,7 +397,7 @@ function PublicLibrary() {
         max_turns: wc.duration_turns || 8,
         time_per_turn_hours: 9,
         faction_assignments,
-        forecasting_enabled: forecastingEnabled,
+        forecasting_enabled: localStorage.getItem('theater_forecasting_default') === 'true',
       })
       navigate(`/sessions/${sessionRes.data.id}`)
     } catch (e) {
@@ -446,17 +433,6 @@ function PublicLibrary() {
           <option value="title">Alphabetical</option>
         </select>
       </div>
-
-      {/* Optional analytic overlay applied to sessions launched via Clone & Play */}
-      <label className="flex items-center gap-2 mb-6 text-xs font-mono text-theater-gray cursor-pointer select-none">
-        <input
-          type="checkbox"
-          checked={forecastingEnabled}
-          onChange={e => setForecastingEnabled(e.target.checked)}
-          className="accent-theater-accent"
-        />
-        Enable forecasting (track your prediction accuracy) for new sessions
-      </label>
 
       {loading ? (
         <LoadingSpinner label="Loading library..." />
@@ -527,17 +503,17 @@ export default function ScenarioLibrary() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-theater-text tracking-wider font-mono flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-theater-text flex items-center gap-3">
             <BookOpen className="w-6 h-6 text-theater-accent-light" />
-            Scenario Library
+            Scenario library
           </h1>
         </div>
         {activeTab === 'mine' && (
           <button
             onClick={() => navigate('/scenarios/new')}
-            className="flex items-center gap-2 bg-theater-accent hover:bg-theater-accent-light text-white px-4 py-2 rounded font-mono text-sm font-semibold tracking-wider transition-colors"
+            className="flex items-center gap-2 bg-theater-accent hover:bg-theater-accent-light text-white px-4 py-2 rounded text-sm font-semibold transition-colors"
           >
-            <Plus className="w-4 h-4" /> New Scenario
+            <Plus className="w-4 h-4" /> New scenario
           </button>
         )}
       </div>
@@ -548,9 +524,9 @@ export default function ScenarioLibrary() {
           <button
             key={id}
             onClick={() => setActiveTab(id)}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-mono border-b-2 transition-all -mb-px ${
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm border-b-2 transition-all -mb-px ${
               activeTab === id
-                ? 'border-theater-accent text-theater-accent-light'
+                ? 'border-theater-accent text-theater-accent-light font-medium'
                 : 'border-transparent text-theater-gray hover:text-theater-text'
             }`}
           >

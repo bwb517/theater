@@ -313,79 +313,22 @@ function InfoOpsRow({ order, onChange, onRemove }) {
   )
 }
 
-// ─── WFF section ─────────────────────────────────────────────────────────────
-
-function WFFSection({ wff, orders, units, session, onAdd, onChange, onRemove, onPickFiresTarget }) {
-  const [open, setOpen] = useState(wff === 'maneuver' || orders.length > 0)
-  const { label, Icon, color, ring, bg, text } = WFF_META[wff]
-  const count = orders.length
-
-  return (
-    <div className={`border rounded-lg overflow-hidden ${ring}`}>
-      <button
-        onClick={() => setOpen(p => !p)}
-        className="w-full flex items-center justify-between px-4 py-3 bg-theater-card hover:bg-theater-card transition-colors"
-      >
-        <div className="flex items-center gap-3">
-          <Icon className="w-4 h-4" style={{ color }} />
-          <span className={`font-mono font-semibold text-sm ${text}`}>{label}</span>
-          {count > 0 && (
-            <span className="text-xs font-mono px-1.5 py-0.5 rounded" style={{ background: color + '22', color }}>
-              {count} order{count !== 1 ? 's' : ''}
-            </span>
-          )}
-        </div>
-        {open ? <ChevronDown className="w-4 h-4 text-theater-muted" /> : <ChevronRight className="w-4 h-4 text-theater-muted" />}
-      </button>
-
-      {open && (
-        <div className={`border-t ${ring} p-4 ${bg} space-y-3`}>
-          {orders.map((order, idx) => (
-            <div key={order.id} className="bg-theater-card border border-theater-border rounded-lg p-3">
-              <div className="flex items-center gap-2 mb-2">
-                <span className={`font-mono text-xs ${text}`}>{label.split(' ')[0]} #{idx + 1}</span>
-              </div>
-              {wff === 'maneuver'        && <ManeuverRow order={order} units={units} session={session} onChange={p => onChange(order.id, p)} onRemove={() => onRemove(order.id)} />}
-              {wff === 'fires'           && <FiresRow    order={order} units={units} onChange={p => onChange(order.id, p)} onRemove={() => onRemove(order.id)} onPickTarget={onPickFiresTarget} />}
-              {wff === 'intelligence'    && <IntelRow    order={order}               onChange={p => onChange(order.id, p)} onRemove={() => onRemove(order.id)} />}
-              {wff === 'logistics'       && <LogisticsRow order={order} units={units} onChange={p => onChange(order.id, p)} onRemove={() => onRemove(order.id)} />}
-              {wff === 'information_ops' && <InfoOpsRow  order={order}               onChange={p => onChange(order.id, p)} onRemove={() => onRemove(order.id)} />}
-            </div>
-          ))}
-
-          <button
-            onClick={() => onAdd(wff)}
-            className={`flex items-center gap-2 text-xs font-mono px-3 py-2 rounded border transition-colors ${ring} ${text} hover:bg-white/5`}
-          >
-            <Plus className="w-3.5 h-3.5" /> ADD {label.split(' ')[0]} ORDER
-          </button>
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function OrdersForm({ session, orders, setOrders, playerUnits, playerFactions, onPickFiresTarget, onSubmitted }) {
   const [faction, setFaction] = useState(playerFactions?.[0]?.faction_id || '')
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  const [activeWff, setActiveWff] = useState('maneuver')
 
   const activeFactionId = faction || playerFactions?.[0]?.faction_id || 'BLUE-01'
   const totalOrders = orders.length
+  const activeOrders = orders.filter(o => o.wff === activeWff)
+  const { label } = WFF_META[activeWff]
 
-  const handleAdd = (wff) => {
-    setOrders(prev => [...prev, blankOrder(wff)])
-  }
-
-  const handleChange = (id, patch) => {
-    setOrders(prev => prev.map(o => o.id === id ? { ...o, ...patch } : o))
-  }
-
-  const handleRemove = (id) => {
-    setOrders(prev => prev.filter(o => o.id !== id))
-  }
+  const handleAdd = () => setOrders(prev => [...prev, blankOrder(activeWff)])
+  const handleChange = (id, patch) => setOrders(prev => prev.map(o => o.id === id ? { ...o, ...patch } : o))
+  const handleRemove = (id) => setOrders(prev => prev.filter(o => o.id !== id))
 
   const handleSubmit = async () => {
     if (totalOrders === 0) return
@@ -409,7 +352,7 @@ export default function OrdersForm({ session, orders, setOrders, playerUnits, pl
       <div className="w-12 h-12 bg-theater-green/20 rounded-full flex items-center justify-center mx-auto mb-3 border border-theater-green/30">
         <Send className="w-5 h-5 text-theater-green" />
       </div>
-      <p className="text-theater-text font-mono font-semibold">ORDERS SUBMITTED</p>
+      <p className="text-theater-text font-semibold">Orders submitted</p>
       <p className="text-theater-muted text-sm mt-1">
         {totalOrders} order{totalOrders !== 1 ? 's' : ''} submitted for Turn {session.current_turn}.
       </p>
@@ -417,18 +360,18 @@ export default function OrdersForm({ session, orders, setOrders, playerUnits, pl
         onClick={() => { setSubmitted(false); setOrders([]) }}
         className="mt-4 text-theater-muted text-xs font-mono border border-theater-border hover:border-theater-accent/40 hover:text-theater-text px-4 py-1.5 rounded transition-colors"
       >
-        CLEAR & RE-ENTER ORDERS
+        Clear & re-enter
       </button>
     </div>
   )
 
   return (
-    <div className="p-4 space-y-3">
+    <div className="p-4 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-theater-text font-mono font-semibold">SUBMIT ORDERS — TURN {session.current_turn}</h3>
-          <p className="text-theater-muted text-xs mt-0.5">Add orders by warfighting function. Orders from the map are included automatically.</p>
+          <h3 className="text-theater-text font-semibold">Submit orders — Turn {session.current_turn}</h3>
+          <p className="text-theater-muted text-xs mt-0.5">Map orders are included automatically.</p>
         </div>
         {playerFactions?.length > 1 && (
           <select value={faction} onChange={e => setFaction(e.target.value)} className={`${sel} text-xs`}>
@@ -437,29 +380,67 @@ export default function OrdersForm({ session, orders, setOrders, playerUnits, pl
         )}
       </div>
 
-      {/* WFF sections */}
-      {Object.keys(WFF_META).map(wff => (
-        <WFFSection
-          key={wff}
-          wff={wff}
-          orders={orders.filter(o => o.wff === wff)}
-          units={playerUnits}
-          session={session}
-          onAdd={handleAdd}
-          onChange={handleChange}
-          onRemove={handleRemove}
-          onPickFiresTarget={onPickFiresTarget}
-        />
-      ))}
+      {/* WFF chip selector */}
+      <div className="flex flex-wrap gap-1">
+        {Object.entries(WFF_META).map(([wff, meta]) => {
+          const count = orders.filter(o => o.wff === wff).length
+          const active = activeWff === wff
+          const WffIcon = meta.Icon
+          return (
+            <button
+              key={wff}
+              onClick={() => setActiveWff(wff)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs transition-all border ${
+                active ? 'border-transparent text-white' : 'border-theater-border text-theater-muted hover:text-theater-gray hover:border-theater-accent/30'
+              }`}
+              style={active ? { background: meta.color } : {}}
+            >
+              <WffIcon className="w-3 h-3" />
+              {meta.label === 'Information Ops' ? 'Info Ops' : meta.label}
+              {count > 0 && (
+                <span
+                  className="w-4 h-4 flex items-center justify-center rounded-full text-[10px] leading-none"
+                  style={active
+                    ? { background: 'rgba(255,255,255,0.25)', color: 'white' }
+                    : { background: meta.color + '33', color: meta.color }
+                  }
+                >
+                  {count}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Orders for the active WFF */}
+      <div className="space-y-3">
+        {activeOrders.map(order => (
+          <div key={order.id} className="border border-theater-border rounded-lg p-3 bg-theater-card">
+            {activeWff === 'maneuver'        && <ManeuverRow  order={order} units={playerUnits} session={session} onChange={p => handleChange(order.id, p)} onRemove={() => handleRemove(order.id)} />}
+            {activeWff === 'fires'           && <FiresRow     order={order} units={playerUnits}                   onChange={p => handleChange(order.id, p)} onRemove={() => handleRemove(order.id)} onPickTarget={onPickFiresTarget} />}
+            {activeWff === 'intelligence'    && <IntelRow     order={order}                                       onChange={p => handleChange(order.id, p)} onRemove={() => handleRemove(order.id)} />}
+            {activeWff === 'logistics'       && <LogisticsRow order={order} units={playerUnits}                   onChange={p => handleChange(order.id, p)} onRemove={() => handleRemove(order.id)} />}
+            {activeWff === 'information_ops' && <InfoOpsRow   order={order}                                       onChange={p => handleChange(order.id, p)} onRemove={() => handleRemove(order.id)} />}
+          </div>
+        ))}
+        <button
+          onClick={handleAdd}
+          className="flex items-center gap-1.5 w-full text-xs px-3 py-2 rounded border border-dashed border-theater-border hover:border-theater-accent/50 text-theater-muted hover:text-theater-text transition-colors"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Add {label.toLowerCase()} order
+        </button>
+      </div>
 
       {/* Submit */}
       <button
         onClick={handleSubmit}
         disabled={submitting || totalOrders === 0}
-        className="w-full flex items-center justify-center gap-2 bg-theater-accent hover:bg-theater-accent-light disabled:opacity-40 text-white py-2.5 rounded font-mono font-semibold transition-colors"
+        className="w-full flex items-center justify-center gap-2 bg-theater-accent hover:bg-theater-accent-light disabled:opacity-40 text-white py-2.5 rounded font-semibold transition-colors"
       >
         <Send className="w-4 h-4" />
-        {submitting ? 'Submitting...' : `Submit ${totalOrders > 0 ? `${totalOrders} Order${totalOrders !== 1 ? 's' : ''}` : 'Orders'}`}
+        {submitting ? 'Submitting…' : `Submit ${totalOrders > 0 ? `${totalOrders} order${totalOrders !== 1 ? 's' : ''}` : 'orders'}`}
       </button>
     </div>
   )
